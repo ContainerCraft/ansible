@@ -1,0 +1,31 @@
+---
+- name: Wait for cloud-init / user-data to finish
+  command: cloud-init status --wait
+  changed_when: false
+
+- import_role:
+    name: packages
+  become: true
+  tags:
+    - packages
+
+- import_role:
+    name: experimental
+  become: true
+  tags:
+    - experimental
+    - firewalld
+    - resolved
+    - grub
+
+- import_role:
+    name: haproxy
+  become: true
+  tags:
+    - haproxy
+
+- import_role:
+    name: keepalived
+  become: true
+  tags:
+    - keepalived

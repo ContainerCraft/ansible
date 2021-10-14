@@ -37,35 +37,32 @@
     packages_remove:
       - zram-generator-defaults
       - cockpit
+      - docker
   tasks:
 
-# - name: Wait for cloud-init / user-data to finish
-#   command: cloud-init status --wait
-#   changed_when: false
+  - name: Wait for cloud-init / user-data to finish
+    command: cloud-init status --wait
+    changed_when: false
 
-# - import_role:
-#     name: packages
-#   tags:
-#     - packages
-
-# - import_role:
-#     name: experimental
-#   tags:
-#     - experimental
-#     - firewalld
-#     - resolved
-#     - grub
-
-# - import_role:
-#     name: haproxy
-#   tags:
-#     - haproxy
-
-# - import_role:
-#     name: keepalived
-#   tags:
-#     - keepalived
-
-  - import_playbook: kubespray/cluster.yml
+  - import_role:
+      name: packages
     tags:
-      - kubespray
+      - packages
+
+  - import_role:
+      name: experimental
+    tags:
+      - experimental
+      - firewalld
+      - resolved
+      - grub
+
+  - import_role:
+      name: haproxy
+    tags:
+      - haproxy
+
+  - import_role:
+      name: keepalived
+    tags:
+      - keepalived

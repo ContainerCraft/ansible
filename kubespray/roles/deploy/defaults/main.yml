@@ -1,0 +1,30 @@
+---
+package_install:
+  - tar
+  - git
+  - vim
+  - tmux
+  - htop
+  - lvm2
+  - lnav
+  - grubby
+  - haproxy
+  - glances
+  - python3
+  - iptables
+  - firewalld
+  - lm_sensors
+  - util-linux
+  - keepalived
+  - libibverbs
+  - openvswitch
+  - python3-pip
+  - screenfetch
+  - kata-containers
+  - openvswitch-devel
+  - NetworkManager-ovs
+  - NetworkManager-tui
+packages_remove:
+  - zram-generator-defaults
+  - cockpit
+  - docker
