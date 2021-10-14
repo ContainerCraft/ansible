@@ -1,0 +1,36 @@
+cat <<EOF > prep.yml ; chmod +x ./prep.yml ; ./prep.yml
+#!/usr/local/bin/ansible-playbook $@
+- name: 'ContainerCraft Collection | kubespray | site.yml' 
+  hosts: high_avail 
+  become: true
+  collections:
+  - containercraft.kubespray
+  tasks:
+
+  - name: Wait for cloud-init / user-data to finish
+    command: cloud-init status --wait
+    changed_when: false
+
+  - import_role:
+      name: containercraft.kubespray.packages
+    tags:
+      - packages
+
+  - import_role:
+      name: containercraft.kubespray.experimental
+    tags:
+      - experimental
+      - firewalld
+      - resolved
+      - grub
+
+  - import_role:
+      name: containercraft.kubespray.haproxy
+    tags:
+      - haproxy
+
+  - import_role:
+      name: containercraft.kubespray.keepalived
+    tags:
+      - keepalived
+EOF

@@ -1,14 +1,15 @@
-#!/usr/local/bin/ansible-playbook
+#!/usr/local/bin/ansible-playbook $@
 - name: 'ContainerCraft Collection | high_availability | site.yml' 
   hosts: high_avail 
-  vars_files:
-    - 'vars.yml'
-# collections:
-# - containercraft.high_availability
+  collections:
+  - containercraft.high_availability
   environment:
     PATH: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
   become: true
   vars:
+    vrrp_id: 42
+    vrrp_nic: br0
+    vrrp_address: 192.168.16.60/24
     package_install:
       - tar
       - git

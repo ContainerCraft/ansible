@@ -35,6 +35,7 @@
     enabled: yes
     state: started
     masked: no
+  ignore_errors: yes
   tags:
     - resolved
     - systemd
@@ -73,6 +74,7 @@
     name: firewalld
     state: stopped
     enabled: no
+  ignore_errors: yes
   tags:
     - firewalld
 

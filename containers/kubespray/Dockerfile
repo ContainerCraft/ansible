@@ -9,6 +9,7 @@ ARG DNF_LIST="\
   openssl \
   coreutils-single \
   glibc-minimal-langpack \
+  vim \
   git \
   tar \
   pigz \
@@ -64,7 +65,10 @@ RUN set -ex \
      && dnf install ${DNF_FLAGS_EXTRA} \
         https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm \
      && dnf install ${DNF_FLAGS_EXTRA} ${DNF_LIST} \
-     && dnf update ${DNF_FLAGS_EXTRA} \
+     && export KUBECTL_VERSION=$(curl --silent -L https://storage.googleapis.com/kubernetes-release/release/stable.txt | sed 's/v//g') \
+     && export KUBECTL_URL="https://storage.googleapis.com/kubernetes-release/release/v${KUBECTL_VERSION}/bin/linux/amd64/kubectl" \
+     && curl --output ${BUILD_PATH}/bin/kubectl -L ${KUBECTL_URL} \
+     && chmod +x ${BUILD_PATH}/bin/kubectl \
      && dnf clean all ${DNF_FLAGS} \
      && rm -rf \
            ${BUILD_PATH}/var/cache/* \
@@ -98,7 +102,8 @@ RUN set -ex                                                                     
      && git clone https://github.com/kubernetes-sigs/kubespray.git /root/kubespray \
     && echo
 WORKDIR /root/kubespray
-ENTRYPOINT /bin/bash
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["--become", "--ask-pass", "--user", "fedora"]
 
 #################################################################################
 # Finalize image
