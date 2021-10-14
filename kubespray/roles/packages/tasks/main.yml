@@ -1,0 +1,33 @@
+---
+- name: Update DNF Cache
+  dnf:
+    update_cache: true
+
+- name: Update All Packages
+  package:
+    name: '*'
+    state: latest 
+
+- name: Removing required packages
+  package:
+    name: "{{ package_remove }}"
+    state: absent
+
+- name: Install required packages
+  package:
+    name: "{{ package_install }}"
+    state: present
+
+- name: Install DNF Automatic Updates
+  package:
+    name: dnf-automatic
+    state: present
+
+- name: 'Enable Automatic Updates - Auto Apply = True'
+  shell: "sed -i 's/^apply_updates = no/apply_updates = yes/g' /etc/dnf/automatic.conf"
+
+- name: Enable DNF Automatic Update Service
+  systemd:
+    name: dnf-automatic.timer
+    state: started
+    enabled: yes

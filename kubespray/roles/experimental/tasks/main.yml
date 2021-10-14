@@ -1,0 +1,102 @@
+---
+- name: 'file | Remove /etc/systemd/resolved.conf'
+  file:
+    path: /etc/systemd/resolved.conf
+    state: absent
+  tags:
+    - resolved
+
+- name: 'Template resolved.conf'
+  template:
+    src: '{{ item.src }}'
+    dest: '{{ item.dest }}'
+    mode: '{{ item.mode }}'
+  loop: 
+    - { src: "resolved.conf.j2", dest: "/etc/systemd/resolved.conf", mode: "0644" }
+  tags:
+    - resolved
+
+- name: 'systemd | Stop Systemd Resolved'
+  become: true
+  systemd:
+    name: systemd-resolved.service
+    enabled: yes
+    state: stopped
+    masked: no
+  tags:
+    - resolved
+    - systemd
+    - service
+
+- name: 'systemd | Start Systemd Resolved'
+  become: true
+  systemd:
+    name: systemd-resolved.service
+    enabled: yes
+    state: started
+    masked: no
+  tags:
+    - resolved
+    - systemd
+    - service
+
+- name: 'file | Create Directory /run/systemd/resolve'
+  file:
+    path: '/run/systemd/resolve'
+    state: directory
+    mode: 0644
+    owner: root
+    group: root
+  tags:
+    - resolved
+
+- name: 'file | Remove /etc/resolv.conf'
+  file:
+    path: '/etc/resolv.conf'
+    state: absent
+  tags:
+    - resolved
+
+- name: 'file | Link resolved.conf to /etc/resolv.conf'
+  file:
+    src: '/run/systemd/resolve/resolv.conf'
+    dest: '/etc/resolv.conf'
+    state: link
+    mode: 0777
+    owner: root
+    group: root
+  tags:
+    - resolved
+
+- name: 'Disable FirewallD - NOT FOR PRODUCTION USE'
+  systemd:
+    name: firewalld
+    state: stopped
+    enabled: no
+  tags:
+    - firewalld
+
+- name: 'Grubby Update Grub CMDLINE Arguments'
+  shell: |
+    set -x;\
+    /sbin/grubby --update-kernel=ALL --args="\
+      iommu=pt \
+      selinux=0 \
+      pci=realloc \
+      setenforce=0 \
+      intel_iommu=on \
+      cgroup_memory=1 \
+      cgroup_enable=cpuset \
+      cgroup_enable=memory \
+      rd.driver.pre=vfio-pci \
+      systemd.unified_cgroup_hierarchy=0 \
+    ";
+  tags:
+    - grub
+    - "grub"
+
+- name: 'Reboot all servers and wait for success'
+  reboot:
+    reboot_timeout: 3600
+  tags:
+    - grub

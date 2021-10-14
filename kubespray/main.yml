@@ -1,0 +1,71 @@
+#!/usr/local/bin/ansible-playbook
+- name: 'ContainerCraft Collection | high_availability | site.yml' 
+  hosts: high_avail 
+  vars_files:
+    - 'vars.yml'
+# collections:
+# - containercraft.high_availability
+  environment:
+    PATH: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+  become: true
+  vars:
+    package_install:
+      - tar
+      - git
+      - vim
+      - tmux
+      - htop
+      - lvm2
+      - lnav
+      - grubby
+      - haproxy
+      - glances
+      - python3
+      - iptables
+      - firewalld
+      - lm_sensors
+      - util-linux
+      - keepalived
+      - libibverbs
+      - openvswitch
+      - python3-pip
+      - screenfetch
+      - kata-containers
+      - openvswitch-devel
+      - NetworkManager-ovs
+      - NetworkManager-tui
+    packages_remove:
+      - zram-generator-defaults
+      - cockpit
+  tasks:
+
+# - name: Wait for cloud-init / user-data to finish
+#   command: cloud-init status --wait
+#   changed_when: false
+
+# - import_role:
+#     name: packages
+#   tags:
+#     - packages
+
+# - import_role:
+#     name: experimental
+#   tags:
+#     - experimental
+#     - firewalld
+#     - resolved
+#     - grub
+
+# - import_role:
+#     name: haproxy
+#   tags:
+#     - haproxy
+
+# - import_role:
+#     name: keepalived
+#   tags:
+#     - keepalived
+
+  - import_playbook: kubespray/cluster.yml
+    tags:
+      - kubespray

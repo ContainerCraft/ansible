@@ -1,0 +1,34 @@
+---
+haproxy_socket: /var/lib/haproxy/stats
+haproxy_chroot: /var/lib/haproxy
+haproxy_user: haproxy
+haproxy_group: haproxy
+
+# Frontend settings.
+haproxy_frontend_name: 'loadbalancer'
+haproxy_frontend_bind_address: '*'
+haproxy_frontend_port: 8443
+haproxy_frontend_mode: 'tcp'
+
+# Backend settings.
+haproxy_backend_name: 'kube-api-server'
+haproxy_backend_mode: 'tcp'
+backend_listen_port: 6443
+haproxy_backend_balance_method: 'roundrobin'
+#haproxy_backend_httpchk: 'HEAD / HTTP/1.1\r\nHost:localhost'
+haproxy_backend_httpchk: ''
+
+# List of backend servers.
+#haproxy_backend_servers: []
+# - name: app1
+#   address: 192.168.0.1:80
+# - name: app2
+#   address: 192.168.0.2:80
+
+# Extra global vars (see README for example usage).
+haproxy_global_vars: []
+
+# Default haproxy timeouts
+haproxy_connect_timeout: 5000
+haproxy_client_timeout: 50000
+haproxy_server_timeout: 50000

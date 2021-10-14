@@ -1,0 +1,4 @@
+---
+vrrp_id: 42
+vrrp_nic: br0
+vrrp_address: 192.168.16.60/24

@@ -1,0 +1,61 @@
+all:
+  vars:
+    vrrp_address: 192.168.16.60/24
+    apiserver_loadbalancer_domain_name: "api.kubespray.home.arpa"
+    loadbalancer_apiserver:
+      address: 192.168.16.60
+      port: 8443
+    container_manager: crio
+    kubelet_deployment_type: host
+    kube_encrypt_secret_data: true
+    kube_network_plugin_multus: true
+    kubelet_shutdown_grace_period: 60s
+    kubelet_shutdown_grace_period_critical_pods: 20s
+    loadbalancer_apiserver_localhost: false
+    auto_renew_certificates: true
+    kubeconfig_localhost: true
+    etcd_deployment_type: host
+    download_container: true
+    kubectl_localhost: true
+    ping_access_ip: true
+    vrrp_nic: br0
+    vrrp_id: 42
+  hosts:
+    node1:
+      ansible_host: 192.168.16.61
+      ip: 192.168.16.61
+      access_ip: 192.168.16.61
+    node2:
+      ansible_host: 192.168.16.62
+      ip: 192.168.16.62
+      access_ip: 192.168.16.62
+    node3:
+      ansible_host: 192.168.16.63
+      ip: 192.168.16.63
+      access_ip: 192.168.16.63
+  children:
+    kube_control_plane:
+      hosts:
+        node1:
+        node2:
+    kube_node:
+      hosts:
+        node1:
+        node2:
+        node3:
+    etcd:
+      hosts:
+        node1:
+        node2:
+        node3:
+    k8s_cluster:
+      children:
+        kube_control_plane:
+        kube_node:
+    high_avail:
+      hosts:
+        node1:
+        node2:
+        node3:
+    calico_rr:
+      hosts: {}

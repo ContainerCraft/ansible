@@ -1,0 +1,63 @@
+name: Publish Ansible Galaxy Collections
+on:
+  push:
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
+    tags:
+      - '*'
+  pull_request:
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
+    tags:
+      - '*'
+jobs:
+  build:
+    runs-on: ubuntu-20.04
+    steps:
+
+    - name: Export Variables
+      run: |
+        set -ex; \
+        echo "github_ref: $GITHUB_REF" ;\
+        echo "GITHUB_REF_TAG=$( echo ${GITHUB_REF} | awk -F'[/]' '/tags/{print $3}' )" >> $GITHUB_ENV ;\
+        echo;
+
+    - name: Setup Python
+      uses: actions/setup-python@v2
+      with:
+        python-version: '3.x'
+
+    - uses: BSFishy/pip-action@v1
+      with:
+        upgrade: true
+        packages: |
+          ansible
+
+    - name: Checkout Repo
+      uses: actions/checkout@v2.3.4
+
+    - name: Template Ansible File galaxy.yml
+      uses: cuchi/jinja2-action@v1.2.0
+      with:
+        template: templates/kubespray-galaxy.yml.j2
+        output_file: kubespray/galaxy.yml
+        strict: true
+        variables: |
+          github_ref=0.${{ env.GITHUB_REF_TAG }}
+ 
+    - name: Build & Publish Collection | High Availability
+      run: |
+        set -x ; \
+        mkdir -p galaxy ;\
+        ansible-galaxy collection build --output-path galaxy kubespray ;\
+        ansible-galaxy collection publish --api-key=${{ secrets.ANSIBLE_GALAXY_API_KEY }} galaxy/containercraft-kubespray-0.${{ env.GITHUB_REF_TAG }}.tar.gz ; \
+        echo;
+
+#   - name: Build & Publish Collection | High Availability
+#     uses: artis3n/ansible_galaxy_collection@v2
+#     with:
+#       collection_dir: './kubespray'
+#       api_key: '${{ secrets.ANSIBLE_GALAXY_API_KEY }}'
+#       galaxy_version: '${{ env.RELEASE_VERSION }}'
