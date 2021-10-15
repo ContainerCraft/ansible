@@ -1,5 +1,4 @@
-cat <<EOF > prep.yml ; chmod +x ./prep.yml ; ./prep.yml
-#!/usr/local/bin/ansible-playbook $@
+---
 - name: 'ContainerCraft Collection | kubespray | site.yml' 
   hosts: high_avail 
   become: true
@@ -33,4 +32,4 @@ cat <<EOF > prep.yml ; chmod +x ./prep.yml ; ./prep.yml
       name: containercraft.kubespray.keepalived
     tags:
       - keepalived
-EOF
+

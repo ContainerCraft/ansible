@@ -1,3 +1,4 @@
+# docker run -it --rm -v /tmp/kube:/root/.kube:z -v ${PWD}/doc/hosts.example.yml:/etc/ansible/hosts:z local/ansible --user usrbinkat -e ansible_ssh_pass=changeme -e ansible_sudo_pass=changeme
 #################################################################################
 # Builder Image
 FROM docker.io/library/centos:8 as rpm
@@ -100,10 +101,11 @@ RUN set -ex                                                                     
           MarkupSafe==1.1.1 \
      && ansible-galaxy collection install -r /root/.ansible/requirements.yml    \
      && git clone https://github.com/kubernetes-sigs/kubespray.git /root/kubespray \
+     && mkdir -p /root/.kube \
     && echo
 WORKDIR /root/kubespray
 ENTRYPOINT ["/entrypoint.sh"]
-CMD ["--become", "--ask-pass", "--user", "fedora"]
+CMD ["--become", "--ask-pass", "--ask-become-pass", "--user", "fedora"]
 
 #################################################################################
 # Finalize image
