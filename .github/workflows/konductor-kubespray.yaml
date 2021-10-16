@@ -51,11 +51,9 @@ jobs:
         file: ./containers/kubespray/Dockerfile
         push: true
         tags: |
-          quay.io/containercraft/konductor
           quay.io/containercraft/konductor:kubespray
           quay.io/containercraft/konductor:kubespray-${{ env.varrundate }}-${{ github.sha }}
 
-          docker.io/containercraft/konductor
           docker.io/containercraft/konductor:kubespray
           docker.io/containercraft/konductor:kubespray-${{ env.varrundate }}-${{ github.sha }}
 

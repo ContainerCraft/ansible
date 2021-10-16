@@ -7,20 +7,15 @@ FROM registry.access.redhat.com/ubi8/ubi as builder
 #################################################################################
 # DNF Package Install List
 ARG DNF_LIST="\
-  openssl \
-  coreutils-single \
-  glibc-minimal-langpack \
-  vim \
-  tar \
-  pigz \
-  bash \
+  vi \
   curl \
-  rsync \
-  unzip \
-  bsdtar \
+  bash \
+  openssl \
   sshpass \
   python3 \
   python3-pip \
+  coreutils-single \
+  glibc-minimal-langpack \
 "
 
 ARG PIP_LIST="\
