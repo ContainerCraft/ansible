@@ -81,7 +81,7 @@ RUN set -ex                                                                     
           k8s \
           passlib \
           kubernetes \
-     && ansible-galaxy collection install -r /root/kubespray/requirements.yml   \
+     && python3 -m pip install --upgrade -r /root/kubespray/requirements.yml    \
      && ansible-galaxy collection install -r /root/.ansible/requirements.yml    \
      && mkdir -p /root/.kube \
     && echo
