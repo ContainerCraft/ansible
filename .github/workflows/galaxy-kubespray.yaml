@@ -1,21 +1,15 @@
 name: Publish Ansible Galaxy Collections
 on:
-  push:
-    paths-ignore:
-      - 'docs/**'
-      - '**.md'
-    tags:
-      - '*'
-  pull_request:
-    paths-ignore:
-      - 'docs/**'
-      - '**.md'
-    tags:
-      - '*'
+  repository_dispatch:
+    types: [ansible-galaxy-kubespray]
+
 jobs:
   build:
     runs-on: ubuntu-20.04
     steps:
+
+    - name: Checkout Repo
+      uses: actions/checkout@v2.3.4
 
     - name: Export Variables
       run: |
@@ -34,9 +28,6 @@ jobs:
         upgrade: true
         packages: |
           ansible
-
-    - name: Checkout Repo
-      uses: actions/checkout@v2.3.4
 
     - name: Template Ansible File galaxy.yml
       uses: cuchi/jinja2-action@v1.2.0
@@ -61,3 +52,12 @@ jobs:
 #       collection_dir: './kubespray'
 #       api_key: '${{ secrets.ANSIBLE_GALAXY_API_KEY }}'
 #       galaxy_version: '${{ env.RELEASE_VERSION }}'
+
+    - name: Build Kargo Deploy Automation Container
+      if: success()
+      uses: peter-evans/repository-dispatch@v1.1.3
+      with:
+        event-type: konductor-kubespray
+        repository: ${{ github.repository }}
+        client-payload: '{"ref": "${{ github.ref }}", "sha": "${{ github.sha }}"}'
+        token: ${{ secrets.GH_ACTIONS_TOKEN }}
