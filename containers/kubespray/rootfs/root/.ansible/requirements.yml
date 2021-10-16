@@ -1,6 +1,5 @@
 ---
 collections:
   - name: community.general
-  - name: community.libvirt
   - name: community.kubernetes
   - name: containercraft.kubespray

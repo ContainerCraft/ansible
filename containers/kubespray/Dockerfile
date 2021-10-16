@@ -1,4 +1,4 @@
-# docker run -it --rm -v /tmp/kube:/root/.kube:z -v ${PWD}/doc/hosts.example.yml:/etc/ansible/hosts:z local/ansible --user usrbinkat -e ansible_ssh_pass=changeme -e ansible_sudo_pass=changeme
+ docker run -it --rm -v /tmp/kube:/root/.kube:z -v ${PWD}/doc/hosts.example.yml:/etc/ansible/hosts:z local/ansible --user usrbinkat -e ansible_ssh_pass=changeme -e ansible_sudo_pass=changeme
 #################################################################################
 # Builder Image
 FROM docker.io/library/centos:8 as rpm
@@ -22,8 +22,6 @@ ARG PIP_LIST="\
   k8s \
   passlib \
   ansible \
-  openshift \
-  github3.py \
   kubernetes \
 "
 
@@ -82,19 +80,8 @@ RUN set -ex                                                                     
      && pip3 install --upgrade ${PIP_LIST}                                      \
           k8s \
           passlib \
-          openshift \
-          github3.py \
           kubernetes \
-          ansible==3.4.0 \
-          ansible-base==2.10.11 \
-          cryptography==2.8 \
-          jinja2==2.11.3 \
-          netaddr==0.7.19 \
-          pbr==5.4.4 \
-          jmespath==0.9.5 \
-          ruamel.yaml==0.16.10 \
-          ruamel.yaml.clib==0.2.4 \
-          MarkupSafe==1.1.1 \
+     && ansible-galaxy collection install -r /root/kubespray/requirements.yml   \
      && ansible-galaxy collection install -r /root/.ansible/requirements.yml    \
      && mkdir -p /root/.kube \
     && echo
