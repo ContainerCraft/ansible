@@ -11,7 +11,6 @@ ARG DNF_LIST="\
   coreutils-single \
   glibc-minimal-langpack \
   vim \
-  git \
   tar \
   pigz \
   bash \
@@ -69,6 +68,8 @@ RUN set -ex \
      && export KUBECTL_VERSION=$(curl --silent -L https://storage.googleapis.com/kubernetes-release/release/stable.txt | sed 's/v//g') \
      && export KUBECTL_URL="https://storage.googleapis.com/kubernetes-release/release/v${KUBECTL_VERSION}/bin/linux/amd64/kubectl" \
      && curl --output ${BUILD_PATH}/bin/kubectl -L ${KUBECTL_URL} \
+     && dnf install git -y \
+     && git clone https://github.com/kubernetes-sigs/kubespray.git ${BUILD_PATH}/root/kubespray \
      && chmod +x ${BUILD_PATH}/bin/kubectl \
      && dnf clean all ${DNF_FLAGS} \
      && rm -rf \
@@ -100,7 +101,6 @@ RUN set -ex                                                                     
           ruamel.yaml.clib==0.2.4 \
           MarkupSafe==1.1.1 \
      && ansible-galaxy collection install -r /root/.ansible/requirements.yml    \
-     && git clone https://github.com/kubernetes-sigs/kubespray.git /root/kubespray \
      && mkdir -p /root/.kube \
     && echo
 WORKDIR /root/kubespray
