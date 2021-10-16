@@ -1,4 +1,4 @@
- docker run -it --rm -v /tmp/kube:/root/.kube:z -v ${PWD}/doc/hosts.example.yml:/etc/ansible/hosts:z local/ansible --user usrbinkat -e ansible_ssh_pass=changeme -e ansible_sudo_pass=changeme
+# docker run -it --rm -v /tmp/kube:/root/.kube:z -v ${PWD}/doc/hosts.example.yml:/etc/ansible/hosts:z local/ansible --user usrbinkat -e ansible_ssh_pass=changeme -e ansible_sudo_pass=changeme
 #################################################################################
 # Builder Image
 FROM docker.io/library/centos:8 as rpm
