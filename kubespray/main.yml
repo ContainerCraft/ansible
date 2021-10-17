@@ -1,8 +1,8 @@
 #!/usr/local/bin/ansible-playbook $@
-- name: 'ContainerCraft Collection | high_availability | site.yml' 
-  hosts: high_avail 
+- name: 'ContainerCraft Collection | kubespray | main.yml' 
+  hosts: kube_node
   collections:
-  - containercraft.high_availability
+  - containercraft.kubespray
   environment:
     PATH: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
   become: true

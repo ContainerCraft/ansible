@@ -44,6 +44,6 @@ backend {{ haproxy_backend_name }}
 {% if haproxy_backend_httpchk != '' %}
     option httpchk {{ haproxy_backend_httpchk }}
 {% endif %}
-{% for h in groups.high_avail  %}
+{% for h in groups.etcd  %}
     server loadbalancer{{ loop.index }} {{ hostvars[h].ansible_host }}:{{ backend_listen_port }} check check-ssl verify none inter 10000
 {% endfor %}

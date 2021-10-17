@@ -28,8 +28,8 @@ keepalived_instances:
     vips:
       - "{{ vrrp_address }} dev {{ vrrp_nic }}"
     virtual_router_id: "{{ vrrp_id }}"
-    state: "{{ (groups['high_avail'].index(inventory_hostname) == 0) | ternary('MASTER','BACKUP') }}"
-    priority: "{{ (groups['high_avail']|length - groups['high_avail'].index(inventory_hostname)) * 250 // (groups['high_avail']|length) }}"
+    state: "{{ (groups['etcd'].index(inventory_hostname) == 0) | ternary('MASTER','BACKUP') }}"
+    priority: "{{ (groups['etcd']|length - groups['etcd'].index(inventory_hostname)) * 250 // (groups['etcd']|length) }}"
 
 # If running keepalived with SELinux, you could need to compile your
 # rules. Please override this list with path to files to compile.
