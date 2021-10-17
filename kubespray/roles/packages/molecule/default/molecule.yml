@@ -70,7 +70,7 @@ provisioner:
   inventory:
     group_vars:
       all:
-        package_install:
+        packages_install:
           - zip
         package_remove:
           - bzip2

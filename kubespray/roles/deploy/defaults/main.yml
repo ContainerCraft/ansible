@@ -1,5 +1,5 @@
 ---
-package_install:
+packages_install:
   - tar
   - git
   - vim

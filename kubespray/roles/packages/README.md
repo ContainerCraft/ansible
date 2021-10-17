@@ -20,7 +20,7 @@ No dependency on other Ansible Galaxy roles.
 ---
 - hosts: servers
   var:
-    package_install:
+    packages_install:
       - vim
     package_remove:
       - nano

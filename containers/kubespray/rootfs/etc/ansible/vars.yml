@@ -7,7 +7,7 @@ packages_remove:
   - docker
   - cockpit
   - zram-generator-defaults
-package_install:
+packages_install:
   - vim
   - git
   - tar
