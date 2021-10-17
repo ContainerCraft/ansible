@@ -7,6 +7,29 @@ packages_remove:
   - docker
   - cockpit
   - zram-generator-defaults
+packages_install:
+  - vim
+  - git
+  - tar
+  - htop
+  - tmux
+  - lvm2
+  - python3
+  - glances
+  - haproxy
+  - iptables
+  - util-linux
+  - libibverbs
+  - keepalived
+  - lm_sensors
+  - python3-pip
+  - screenfetch
+  - openvswitch
+  - dnf-automatic
+  - kata-containers
+  - openvswitch-devel
+  - NetworkManager-tui
+  - NetworkManager-ovs
 apiserver_loadbalancer_domain_name: "{{ lookup('env', 'KUBE_API_FQDN') | default('api.kubespray.home.arpa', true) }}"
 container_manager: crio
 kubelet_deployment_type: host
