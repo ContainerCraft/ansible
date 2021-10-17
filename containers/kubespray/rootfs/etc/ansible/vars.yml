@@ -1,0 +1,25 @@
+---
+vrrp_address: {{ lookup('env', 'VRRP_IP') | default('192.168.16.60', true) }}
+loadbalancer_apiserver:
+  address: {{ lookup('env', 'VRRP_IP') | default('192.168.16.60', true) }}
+  port: 8443
+packages_remove:
+  - docker
+  - cockpit
+  - zram-generator-defaults
+apiserver_loadbalancer_domain_name: {{ lookup('env', 'KUBE_API_FQDN') | default('api.kubespray.home.arpa', true) }}
+container_manager: crio
+kubelet_deployment_type: host
+kube_encrypt_secret_data: true
+kube_network_plugin_multus: true
+kubelet_shutdown_grace_period: 60s
+kubelet_shutdown_grace_period_critical_pods: 20s
+loadbalancer_apiserver_localhost: false
+auto_renew_certificates: true
+kubeconfig_localhost: true
+etcd_deployment_type: host
+download_container: true
+kubectl_localhost: true
+ping_access_ip: true
+vrrp_nic: br0
+vrrp_id: 42

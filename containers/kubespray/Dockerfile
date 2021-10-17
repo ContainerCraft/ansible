@@ -1,4 +1,4 @@
-# docker run -it --rm -v /tmp/kube:/root/.kube:z -v ${PWD}/doc/hosts.example.yml:/etc/ansible/hosts:z local/ansible --user usrbinkat -e ansible_ssh_pass=changeme -e ansible_sudo_pass=changeme
+# docker run -it --rm -v /tmp/kube:/root/.kube:z -e KUBE_API_DNS="api.kubespray.home.arpa" -e HOSTS="192.168.16.61 192.168.16.62 192.168.16.63" -e VRRP_IP="192.168.16.60" local/kubespray:latest --user usrbinkat -e ansible_ssh_pass=changeme -e ansible_sudo_pass=changeme
 #################################################################################
 # Builder Image
 FROM docker.io/library/centos:8 as rpm
@@ -14,6 +14,7 @@ ARG DNF_LIST="\
   sshpass \
   python3 \
   python3-pip \
+  openssh-server \
   coreutils-single \
   glibc-minimal-langpack \
 "
@@ -61,13 +62,17 @@ RUN set -ex \
      && export KUBECTL_VERSION=$(curl --silent -L https://storage.googleapis.com/kubernetes-release/release/stable.txt | sed 's/v//g') \
      && export KUBECTL_URL="https://storage.googleapis.com/kubernetes-release/release/v${KUBECTL_VERSION}/bin/linux/amd64/kubectl" \
      && curl --output ${BUILD_PATH}/bin/kubectl -L ${KUBECTL_URL} \
-     && dnf install git -y \
-     && git clone https://github.com/kubernetes-sigs/kubespray.git ${BUILD_PATH}/root/kubespray \
      && chmod +x ${BUILD_PATH}/bin/kubectl \
+     && dnf install git -y \
      && dnf clean all ${DNF_FLAGS} \
      && rm -rf \
            ${BUILD_PATH}/var/cache/* \
      && du -sh ${BUILD_PATH} \
+    && echo
+
+RUN set -ex \
+     && git clone https://github.com/kubernetes-sigs/kubespray.git ${BUILD_PATH}/root/kubespray \
+     && chmod +x ${BUILD_PATH}/root/kubespray/contrib/inventory_builder/inventory.py \
     && echo
 
 #################################################################################
@@ -75,6 +80,7 @@ RUN set -ex \
 FROM scratch
 COPY --from=builder /rootfs /
 ADD ./rootfs /
+WORKDIR /root/kubespray
 RUN set -ex                                                                     \
      && python3 -m pip install --upgrade pip                                    \
      && pip3 install --upgrade ${PIP_LIST}                                      \
@@ -85,19 +91,22 @@ RUN set -ex                                                                     
      && ansible-galaxy collection install -r /root/.ansible/requirements.yml    \
      && mkdir -p /root/.kube \
     && echo
-WORKDIR /root/kubespray
-ENTRYPOINT ["/entrypoint.sh"]
-CMD ["--become", "--ask-pass", "--ask-become-pass", "--user", "fedora"]
+ENTRYPOINT ["/entrypoint.sh", "--become", "--extra-vars", "@/etc/ansible/vars.yml"]
+CMD ["--ask-pass", "--user", "fedora"]
 
 #################################################################################
 # Finalize image
 MAINTAINER ContainerCraft.io
+ENV \
+  CONFIG_FILE=/etc/ansible/hosts \
+  PATH=/root/platform/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/root/platform/bin:/root/kubespray/contrib/inventory_builder/
+
 LABEL \
   license=GPLv3                                                                 \
   name="minimal"                                                                \
   distribution-scope="public"                                                   \
   io.openshift.tags="minimal"                                                   \
   io.k8s.display-name="ubi:minimal"                                             \
-  summary="Minimal Base Image | Red Hat UBI Supportable Image"            \
-  description="Minimal Base Image | Red Hat UBI Supportable Image"        \
+  summary="Minimal Base Image | Red Hat UBI Supportable Image"                  \
+  description="Minimal Base Image | Red Hat UBI Supportable Image"              \
   io.k8s.description="Minimal Base Image | Red Hat UBI Supportable Image"
