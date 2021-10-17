@@ -1,13 +1,13 @@
 ---
-vrrp_address: {{ lookup('env', 'VRRP_IP') | default('192.168.16.60', true) }}
+vrrp_address: "{{ lookup('env', 'VRRP_IP') | default('192.168.16.60', true) }}"
 loadbalancer_apiserver:
-  address: {{ lookup('env', 'VRRP_IP') | default('192.168.16.60', true) }}
+  address: "{{ lookup('env', 'VRRP_IP') | default('192.168.16.60', true) }}"
   port: 8443
 packages_remove:
   - docker
   - cockpit
   - zram-generator-defaults
-apiserver_loadbalancer_domain_name: {{ lookup('env', 'KUBE_API_FQDN') | default('api.kubespray.home.arpa', true) }}
+apiserver_loadbalancer_domain_name: "{{ lookup('env', 'KUBE_API_FQDN') | default('api.kubespray.home.arpa', true) }}"
 container_manager: crio
 kubelet_deployment_type: host
 kube_encrypt_secret_data: true
