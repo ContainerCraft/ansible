@@ -18,6 +18,9 @@ kubectl label nodes node1 node2 node3 --overwrite node-role.kubernetes.io/contro
 
 kubectl label nodes --all --overwrite node-role.kubernetes.io/worker=''
 
+kubectl patch deployment -n kube-system coredns --patch='{"spec":{"template":{"spec":{"tolerations":[]}}}}'
+kubectl -n kube-system rollout restart deployment/coredns
+
 sleep 6
 
 kubectl get po -A
