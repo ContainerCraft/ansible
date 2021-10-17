@@ -14,7 +14,7 @@ ARG DNF_LIST="\
   sshpass \
   python3 \
   python3-pip \
-  openssh-server \
+  openssh-clients \
   coreutils-single \
   glibc-minimal-langpack \
 "
