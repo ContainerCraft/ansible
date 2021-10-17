@@ -63,6 +63,9 @@ RUN set -ex \
      && export KUBECTL_URL="https://storage.googleapis.com/kubernetes-release/release/v${KUBECTL_VERSION}/bin/linux/amd64/kubectl" \
      && curl --output ${BUILD_PATH}/bin/kubectl -L ${KUBECTL_URL} \
      && chmod +x ${BUILD_PATH}/bin/kubectl \
+     && mkdir -p /root/patch \
+     && curl --output ${BUILD_PATH}/root/patch/multus-daemonset.yml \
+             -L https://raw.githubusercontent.com/k8snetworkplumbingwg/multus-cni/master/deployments/multus-daemonset.yml \
      && dnf install git -y \
      && dnf clean all ${DNF_FLAGS} \
      && rm -rf \
