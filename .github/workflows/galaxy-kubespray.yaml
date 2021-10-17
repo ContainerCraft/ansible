@@ -1,7 +1,8 @@
 name: Publish Ansible Galaxy Collections
 on:
-  tag:
-  - '*'
+  create:
+    tags:
+      - '*'
 # repository_dispatch:
 #   types: [ansible-galaxy-kubespray]
 
