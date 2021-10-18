@@ -9,6 +9,7 @@
   - name: Wait for cloud-init / user-data to finish
     command: cloud-init status --wait
     changed_when: false
+    ignore_errors: yes
 
   - import_role:
       name: containercraft.kubespray.packages
