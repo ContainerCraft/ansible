@@ -1,3 +1,16 @@
 ---
-packages_install: []
-package_remove: []
+package_remove:
+  - docker
+  - cockpit
+  - zram-generator
+  - zram-generator-defaults
+packages_install:
+  - lvm2
+  - python3
+  - haproxy
+  - iptables
+  - util-linux
+  - libibverbs
+  - keepalived
+  - dnf-automatic
+  - NetworkManager-tui
