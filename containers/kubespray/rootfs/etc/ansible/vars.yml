@@ -6,6 +6,7 @@ loadbalancer_apiserver:
 packages_remove:
   - docker
   - cockpit
+  - zram-generator
   - zram-generator-defaults
 packages_install:
   - vim

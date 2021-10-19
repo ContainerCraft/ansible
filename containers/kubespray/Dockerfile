@@ -75,7 +75,8 @@ RUN set -ex \
     && echo
 
 RUN set -ex \
-     && git clone https://github.com/kubernetes-sigs/kubespray.git ${BUILD_PATH}/root/kubespray \
+     && export RELEASE=$(curl -s https://api.github.com/repos/kubernetes-sigs/kubespray/releases/latest | awk -F '["v,]' '/tag_name/{print $5}') \
+     && git clone https://github.com/kubernetes-sigs/kubespray.git --branch v${RELEASE} ${BUILD_PATH}/root/kubespray \
      && chmod +x ${BUILD_PATH}/root/kubespray/contrib/inventory_builder/inventory.py \
     && echo
 
