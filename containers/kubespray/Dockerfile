@@ -8,6 +8,7 @@ FROM registry.access.redhat.com/ubi8/ubi as builder
 # DNF Package Install List
 ARG DNF_LIST="\
   vi \
+  git \
   curl \
   bash \
   openssl \
