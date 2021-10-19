@@ -1,5 +1,6 @@
 #!/bin/bash -x
 # ansible-playbook --user fedora -e ansible_ssh_pass=fedora -e ansible_sudo_pass=fedora --become ./cluster.yml
+# /entrypoint.sh --user fedora -e ansible_ssh_pass=fedora -e ansible_sudo_pass=fedora
 
 declare -a IPS="${HOSTS}"
 

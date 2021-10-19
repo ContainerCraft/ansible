@@ -3,7 +3,7 @@ vrrp_address: "{{ lookup('env', 'VRRP_IP') | default('192.168.16.60', true) }}"
 loadbalancer_apiserver:
   address: "{{ lookup('env', 'VRRP_IP') | default('192.168.16.60', true) }}"
   port: 8443
-packages_remove:
+package_remove:
   - docker
   - cockpit
   - zram-generator

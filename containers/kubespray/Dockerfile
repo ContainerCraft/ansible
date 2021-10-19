@@ -1,4 +1,4 @@
-# docker run -it --rm -v /tmp/kube:/root/.kube:z -e KUBE_API_DNS="api.kubespray.home.arpa" -e HOSTS="192.168.16.61 192.168.16.62 192.168.16.63" -e VRRP_IP="192.168.16.60" local/kubespray:latest --user usrbinkat -e ansible_ssh_pass=changeme -e ansible_sudo_pass=changeme
+# docker run -it --rm -v /tmp/kube:/root/.kube:z -e KUBE_API_FQDN="api.kubespray.home.arpa" -e HOSTS="192.168.16.61 192.168.16.62 192.168.16.63" -e VRRP_IP="192.168.16.60" local/kubespray:latest --user usrbinkat -e ansible_ssh_pass=changeme -e ansible_sudo_pass=changeme
 #################################################################################
 # Builder Image
 FROM docker.io/library/centos:8 as rpm
