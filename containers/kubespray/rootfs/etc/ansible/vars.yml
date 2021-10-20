@@ -44,6 +44,7 @@ kubeconfig_localhost: true
 etcd_deployment_type: host
 download_container: true
 kubectl_localhost: true
+dns_min_replicas: 1
 ping_access_ip: true
 vrrp_nic: br0
 vrrp_id: 42
