@@ -42,7 +42,7 @@ loadbalancer_apiserver_localhost: false
 auto_renew_certificates: true
 kubeconfig_localhost: true
 etcd_deployment_type: host
-cert_manager_enabled: true
+cert_manager_enabled: false ## Blocked by Kubespray Multus Bug
 download_container: true
 kubectl_localhost: true
 dns_min_replicas: 1
