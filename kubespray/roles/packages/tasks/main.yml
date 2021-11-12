@@ -6,7 +6,7 @@
 - name: Update All Packages
   package:
     name: '*'
-    state: latest 
+    state: latest
 
 - name: Removing required packages
   package:
@@ -24,7 +24,10 @@
     state: present
 
 - name: 'Enable Automatic Updates - Auto Apply = True'
-  shell: "sed -i 's/^apply_updates = no/apply_updates = yes/g' /etc/dnf/automatic.conf"
+  lineinfile:
+    path: /etc/dnf/automatic.conf
+    regexp: "^apply_updates = no"
+    line: "apply_updates = yes"
 
 - name: Enable DNF Automatic Update Service
   systemd:
