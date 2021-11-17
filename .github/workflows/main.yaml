@@ -17,7 +17,7 @@ jobs:
       run: |
         set -ex; \
         echo "github_ref: $GITHUB_REF" ;\
-        echo ::set-output name=GITHUB_REF_TAG=$(echo $GITHUB_REF | awk -F/ '{print $NF}' | awk -F- '{print $NF}'); \
+        echo ::set-output name=GITHUB_REF_TAG::$(echo $GITHUB_REF | awk -F/ '{print $NF}' | awk -F- '{print $NF}'); \
         echo;
 
     - name: Setup Python
@@ -29,15 +29,13 @@ jobs:
       run: pip install -U ansible
 
     - name: Template Ansible File galaxy.yml
-      uses: cuchi/jinja2-action@v1.2.0
-      with:
-        template: templates/kubespray-galaxy.yml.j2
-        output_file: kubespray/galaxy.yml
-        strict: true
-        variables: |
-          github_ref=0.${{ steps.github_ref.outputs.GITHUB_REF_TAG }}
+      run: |
+        ansible localhost --connection local \
+          -i localhost -m template \
+          -a "src=templates/kubespray-galaxy.yml.j2 dest=kubespray/galaxy.yml" \
+          -e github_ref=0.${{ steps.github_ref.outputs.GITHUB_REF_TAG }}
 
-    - name: Build & Publish Collection | High Availability
+    - name: Build & Publish Collection | Kubespray
       run: |
         set -x ; \
         mkdir -p galaxy ;\
@@ -48,7 +46,7 @@ jobs:
         variables: |
           github_ref=0.${{ steps.github_ref.outputs.GITHUB_REF_TAG }}
 
-  build:
+  build-and-publish-image:
     runs-on: ubuntu-20.04
     needs: build-and-publish-collection
     steps:
