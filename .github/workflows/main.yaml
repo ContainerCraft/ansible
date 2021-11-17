@@ -25,8 +25,13 @@ jobs:
       with:
         python-version: '3.x'
 
+    - uses: actions/cache@v2
+      with:
+        path: ${{ env.pythonLocation }}
+        key: ${{ env.pythonLocation }}-${{ hashFiles('requirements.txt') }}
+
     - name: Install ansible
-      run: pip install -U ansible
+      run: pip install -U -r requirements.txt
 
     - name: Template Ansible File galaxy.yml
       run: |
@@ -41,7 +46,7 @@ jobs:
         mkdir -p galaxy ;\
         ansible-galaxy collection build --output-path galaxy kubespray ;\
         ansible-galaxy collection publish --api-key=${{ secrets.ANSIBLE_GALAXY_API_KEY }} \
-        galaxy/containercraft-kubespray-0.${{ steps.github_ref.outputs.GITHUB_REF_TAG }}.tar.gz ; \
+          galaxy/containercraft-kubespray-0.${{ steps.github_ref.outputs.GITHUB_REF_TAG }}.tar.gz ; \
         echo;
 
   build-and-publish-image:
