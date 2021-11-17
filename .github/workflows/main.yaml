@@ -17,7 +17,7 @@ jobs:
       run: |
         set -ex; \
         echo "github_ref: $GITHUB_REF" ;\
-        echo ::set-output name=GITHUB_REF_TAG=$(echo $GITHUB_REF | awk -F/ '{print $NF}' | awk -F- '{print $NF}'); \
+        echo ::set-output name=GITHUB_REF_TAG::$(echo $GITHUB_REF | awk -F/ '{print $NF}' | awk -F- '{print $NF}'); \
         echo;
 
     - name: Setup Python
@@ -46,7 +46,7 @@ jobs:
           galaxy/containercraft-kubespray-0.${{ steps.github_ref.outputs.GITHUB_REF_TAG }}.tar.gz ; \
         echo;
 
-  build:
+  build-and-publish-image:
     runs-on: ubuntu-20.04
     needs: build-and-publish-collection
     steps:
