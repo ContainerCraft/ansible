@@ -29,15 +29,13 @@ jobs:
       run: pip install -U ansible
 
     - name: Template Ansible File galaxy.yml
-      uses: cuchi/jinja2-action@v1.2.0
-      with:
-        template: templates/kubespray-galaxy.yml.j2
-        output_file: kubespray/galaxy.yml
-        strict: true
-        variables: |
-          github_ref=0.${{ steps.github_ref.outputs.GITHUB_REF_TAG }}
+      run: |
+        ansible localhost --connection local \
+          -i localhost -m template \
+          -a "src=templates/kubespray-galaxy.yml.j2 dest=kubespray/galaxy.yml" \
+          -e github_ref=0.${{ steps.github_ref.outputs.GITHUB_REF_TAG }}
 
-    - name: Build & Publish Collection | High Availability
+    - name: Build & Publish Collection | Kubespray
       run: |
         set -x ; \
         mkdir -p galaxy ;\
