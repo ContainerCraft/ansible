@@ -33,7 +33,7 @@ jobs:
         ansible localhost --connection local \
           -i localhost -m template \
           -a "src=templates/kubespray-galaxy.yml.j2 dest=kubespray/galaxy.yml" \
-          -e github_ref=0.${{ steps.github_ref.outputs.GITHUB_REF_TAG }}
+          -e "github_ref=0.${{ steps.github_ref.outputs.GITHUB_REF_TAG }}"
 
     - name: Build & Publish Collection | Kubespray
       run: |
