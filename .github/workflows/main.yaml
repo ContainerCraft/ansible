@@ -43,8 +43,10 @@ jobs:
         mkdir -p galaxy ;\
         ansible-galaxy collection build --output-path galaxy kubespray ;\
         ansible-galaxy collection publish --api-key=${{ secrets.ANSIBLE_GALAXY_API_KEY }} \
-          galaxy/containercraft-kubespray-0.${{ steps.github_ref.outputs.GITHUB_REF_TAG }}.tar.gz ; \
+        galaxy/containercraft-kubespray-${{ github_ref }}.tar.gz ; \
         echo;
+        variables: |
+          github_ref=0.${{ steps.github_ref.outputs.GITHUB_REF_TAG }}
 
   build:
     runs-on: ubuntu-20.04
