@@ -68,7 +68,7 @@ RUN set -ex \
      && chmod +x ${BUILD_PATH}/bin/kubectl \
      && mkdir -p ${BUILD_PATH}/root/patch \
      && curl --output ${BUILD_PATH}/root/patch/multus-daemonset.yml \
-             -L https://raw.githubusercontent.com/k8snetworkplumbingwg/multus-cni/master/deployments/multus-daemonset.yml \
+             -L https://raw.githubusercontent.com/k8snetworkplumbingwg/multus-cni/master/deployments/multus-daemonset-thick-plugin.yml \
      && dnf install git -y \
      && dnf clean all ${DNF_FLAGS} \
      && rm -rf \
