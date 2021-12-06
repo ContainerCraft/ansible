@@ -17,11 +17,13 @@ ARG DNF_LIST="\
   python3-pip \
   openssh-clients \
   coreutils-single \
+  libselinux-python3 \
   glibc-minimal-langpack \
 "
 
 ARG PIP_LIST="\
   k8s \
+  selinux \
   passlib \
   ansible \
   kubernetes \
@@ -76,9 +78,12 @@ RUN set -ex \
 
 RUN set -ex \
      && export RELEASE=$(curl -s https://api.github.com/repos/kubernetes-sigs/kubespray/releases/latest | awk -F '["v,]' '/tag_name/{print $5}') \
-     && git clone https://github.com/kubernetes-sigs/kubespray.git --branch v${RELEASE} ${BUILD_PATH}/root/kubespray \
+     && git clone https://github.com/kubernetes-sigs/kubespray.git ${BUILD_PATH}/root/kubespray \
      && chmod +x ${BUILD_PATH}/root/kubespray/contrib/inventory_builder/inventory.py \
     && echo
+
+# Disable tagged git clone temporarily to gain fedora 35 support before release
+#    && git clone https://github.com/kubernetes-sigs/kubespray.git --branch v${RELEASE} ${BUILD_PATH}/root/kubespray \
 
 #################################################################################
 # Create image from rootfs
