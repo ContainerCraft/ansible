@@ -68,7 +68,7 @@ RUN set -ex \
      && chmod +x ${BUILD_PATH}/bin/kubectl \
      && mkdir -p ${BUILD_PATH}/root/patch \
      && curl --output ${BUILD_PATH}/root/patch/multus-daemonset.yml \
-             -L https://raw.githubusercontent.com/k8snetworkplumbingwg/multus-cni/master/deployments/multus-daemonset-thick-plugin.yml \
+             -L https://raw.githubusercontent.com/k8snetworkplumbingwg/multus-cni/master/deployments/multus-daemonset.yml \
      && dnf install git -y \
      && dnf clean all ${DNF_FLAGS} \
      && rm -rf \
@@ -78,7 +78,7 @@ RUN set -ex \
 
 RUN set -ex \
      && export RELEASE=$(curl -s https://api.github.com/repos/kubernetes-sigs/kubespray/releases/latest | awk -F '["v,]' '/tag_name/{print $5}') \
-     && git clone https://github.com/kubernetes-sigs/kubespray.git ${BUILD_PATH}/root/kubespray \
+     && git clone https://github.com/kubernetes-sigs/kubespray.git --branch v${RELEASE} ${BUILD_PATH}/root/kubespray \
      && chmod +x ${BUILD_PATH}/root/kubespray/contrib/inventory_builder/inventory.py \
     && echo
 
@@ -93,30 +93,32 @@ ADD ./rootfs /
 WORKDIR /root/kubespray
 RUN set -ex                                                                     \
      && python3 -m pip install --upgrade pip                                    \
-     && pip3 install --upgrade ${PIP_LIST}                                      \
+     && pip3 install --upgrade $PIP_LIST                                        \
           k8s \
+          selinux \
           passlib \
+          ansible \
           kubernetes \
      && python3 -m pip install --upgrade -r /root/kubespray/requirements.txt    \
      && ansible-galaxy collection install -r /root/.ansible/requirements.yml    \
      && mkdir -p /root/.kube \
     && echo
 ENTRYPOINT ["/entrypoint.sh", "--become", "--extra-vars", "@/etc/ansible/vars.yml"]
-CMD ["--ask-pass", "--user", "fedora"]
+CMD ["--ask-pass", "--user", "kc2admin"]
 
 #################################################################################
 # Finalize image
-MAINTAINER ContainerCraft.io
 ENV \
   CONFIG_FILE=/etc/ansible/hosts \
   PATH=/root/platform/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/root/platform/bin:/root/kubespray/contrib/inventory_builder/
 
 LABEL \
-  license=GPLv3                                                                 \
-  name="minimal"                                                                \
-  distribution-scope="public"                                                   \
-  io.openshift.tags="minimal"                                                   \
-  io.k8s.display-name="ubi:minimal"                                             \
-  summary="Minimal Base Image | Red Hat UBI Supportable Image"                  \
-  description="Minimal Base Image | Red Hat UBI Supportable Image"              \
-  io.k8s.description="Minimal Base Image | Red Hat UBI Supportable Image"
+  license=GPLv3                                                                     \
+  name="konductor-kubespray"                                                        \
+  author="ContainerCraft.io | github.com/containercraft/ansible"                    \
+  distribution-scope="public"                                                       \
+  io.openshift.tags="konductor-kubespray"                                           \
+  io.k8s.display-name="ubi8:micro"                                                  \
+  summary="CCIO Kubespray Deployment Tools | Red Hat UBI Micro Distroless Image"    \
+  description="CCIO Kubespray Deployment Tools | Red Hat UBI Micro Distroless Image"\
+  io.k8s.description="CCIO Kubespray Deployment Tools | Red Hat UBI Micro Distroless Image"

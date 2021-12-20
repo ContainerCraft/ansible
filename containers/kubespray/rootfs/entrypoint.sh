@@ -1,4 +1,4 @@
-#!/bin/bash -x
+#!/bin/bash
 
 declare -a IPS="${HOSTS}"
 
@@ -24,6 +24,6 @@ kubectl apply -f /root/patch/multus-daemonset.yml
 #kubectl patch deployment -n kube-system coredns --patch='{"spec":{"template":{"spec":{"tolerations":[]}}}}'
 #kubectl -n kube-system rollout restart deployment/coredns
 sleep 7
-kubectl apply -f /root/patch/multus-daemonset.yml
-kubectl get po -A
+kubectl apply -f /root/patch/multus-daemonset.yml || kubectl apply -f /root/patch/multus-daemonset.yml
 cat /etc/ansible/artifacts/admin.conf > /config
+kubectl get po -A
