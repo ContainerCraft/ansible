@@ -1,7 +1,6 @@
 ---
 package_remove:
   - docker
-  - cockpit
   - zram-generator
   - zram-generator-defaults
 packages_install:
@@ -9,8 +8,18 @@ packages_install:
   - python3
   - haproxy
   - iptables
+  - cockpit-ws
   - util-linux
   - libibverbs
   - keepalived
   - dnf-automatic
   - NetworkManager-tui
+  - cockpit-networkmanager
+  - cockpit-packagekit
+  - cockpit-navigator
+  - cockpit-storaged
+  - cockpit-selinux
+  - cockpit-system
+  - cockpit-bridge
+  - cockpit-pcp
+  - cockpit
