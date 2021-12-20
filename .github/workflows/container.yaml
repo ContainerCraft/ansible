@@ -18,7 +18,6 @@ on:
 jobs:
   build-and-publish-image:
     runs-on: ubuntu-20.04
-    needs: build-and-publish-collection
     steps:
 
     - name: Setup Docker Buildx
