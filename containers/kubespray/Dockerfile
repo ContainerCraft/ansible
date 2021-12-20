@@ -25,7 +25,6 @@ ARG PIP_LIST="\
   k8s \
   selinux \
   passlib \
-  ansible \
   kubernetes \
 "
 
@@ -97,8 +96,8 @@ RUN set -ex                                                                     
           k8s \
           selinux \
           passlib \
-          ansible \
           kubernetes \
+          ansible==2.10.7 \
      && python3 -m pip install --upgrade -r /root/kubespray/requirements.txt    \
      && ansible-galaxy collection install -r /root/.ansible/requirements.yml    \
      && mkdir -p /root/.kube \

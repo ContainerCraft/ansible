@@ -1,56 +1,21 @@
-name: Build and Publish
+name: Build & Publish Konductor Kubespray Container
 on:
-  #schedule:
-  #  - cron: '0 1 * * *'
-  create:
-    tags:
-      - '*'
+  schedule:
+    - cron: '0 1 * * *'
+  push:
+    paths-ignore:
+    - 'docs/**'
+    - '**.md'
+    branches:
+      - master
+  pull_request:
+    paths-ignore:
+    - 'docs/**'
+    - '**.md'
+    branches:
+      - master
 
 jobs:
-  build-and-publish-collection:
-    runs-on: ubuntu-20.04
-    steps:
-
-    - name: Checkout Repo
-      uses: actions/checkout@v2.4.0
-
-    - name: Export Variables
-      id: github_ref
-      run: |
-        set -ex; \
-        echo "github_ref: $GITHUB_REF" ;\
-        echo ::set-output name=GITHUB_REF_TAG::$(echo $GITHUB_REF | awk -F/ '{print $NF}' | awk -F- '{print $NF}'); \
-        echo;
-
-    - name: Setup Python
-      uses: actions/setup-python@v2
-      with:
-        python-version: '3.x'
-
-    - uses: actions/cache@v2
-      with:
-        path: ${{ env.pythonLocation }}
-        key: ${{ env.pythonLocation }}-${{ hashFiles('requirements.txt') }}
-
-    - name: Install ansible
-      run: pip install -U -r requirements.txt
-
-    - name: Template Ansible File galaxy.yml
-      run: |
-        ansible localhost --connection local \
-          -i localhost -m template \
-          -a "src=templates/kubespray-galaxy.yml.j2 dest=kubespray/galaxy.yml" \
-          -e "github_ref=0.${{ steps.github_ref.outputs.GITHUB_REF_TAG }}"
-
-    - name: Build & Publish Collection | Kubespray
-      run: |
-        set -x ; \
-        mkdir -p galaxy ;\
-        ansible-galaxy collection build --output-path galaxy kubespray ;\
-        ansible-galaxy collection publish --api-key=${{ secrets.ANSIBLE_GALAXY_API_KEY }} \
-          galaxy/containercraft-kubespray-0.${{ steps.github_ref.outputs.GITHUB_REF_TAG }}.tar.gz ; \
-        echo;
-
   build-and-publish-image:
     runs-on: ubuntu-20.04
     needs: build-and-publish-collection
