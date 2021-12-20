@@ -1,5 +1,8 @@
 name: Build & Publish Konductor Kubespray Container
 on:
+  repository_dispatch:
+    types:
+      - container
   schedule:
     - cron: '0 1 * * *'
   push:

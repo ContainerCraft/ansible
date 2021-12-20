@@ -48,3 +48,12 @@ jobs:
         ansible-galaxy collection publish --api-key=${{ secrets.ANSIBLE_GALAXY_API_KEY }} \
           galaxy/containercraft-kubespray-0.${{ steps.github_ref.outputs.GITHUB_REF_TAG }}.tar.gz ; \
         echo;
+
+    - name: Build Konductor Kubespray Container Image
+      if: success()
+      uses: peter-evans/repository-dispatch@v1.1.3
+      with:
+        event-type: container
+        token: ${{ secrets.GH_ACTIONS_TOKEN }}
+        repository: ${{ github.repository }}
+        client-payload: '{"ref": "${{ github.ref }}", "sha": "${{ github.sha }}"}'

@@ -1,30 +1,41 @@
 ---
+packages_remove:
+  - docker
+  - zram-generator
+  - zram-generator-defaults
 packages_install:
   - tar
   - git
   - vim
   - tmux
-  - htop
   - lvm2
+  - python3
+  - haproxy
+  - iptables
+  - cockpit-ws
+  - util-linux
+  - libibverbs
+  - keepalived
+  - dnf-automatic
+  - NetworkManager-tui
+  - cockpit-networkmanager
+  - cockpit-packagekit
+  - cockpit-navigator
+  - cockpit-storaged
+  - cockpit-selinux
+  - cockpit-system
+  - cockpit-bridge
+  - cockpit-pcp
+  - cockpit
+  - htop
   - lnav
   - grubby
-  - haproxy
   - glances
-  - python3
-  - iptables
   - firewalld
   - lm_sensors
-  - util-linux
-  - keepalived
-  - libibverbs
   - openvswitch
   - python3-pip
   - screenfetch
   - kata-containers
   - openvswitch-devel
   - NetworkManager-ovs
-  - NetworkManager-tui
-packages_remove:
-  - zram-generator-defaults
-  - cockpit
-  - docker

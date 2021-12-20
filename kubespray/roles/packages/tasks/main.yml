@@ -10,7 +10,7 @@
 
 - name: Removing required packages
   package:
-    name: "{{ package_remove }}"
+    name: "{{ packages_remove }}"
     state: absent
 
 - name: Install required packages
@@ -32,5 +32,11 @@
 - name: Enable DNF Automatic Update Service
   systemd:
     name: dnf-automatic.timer
+    state: started
+    enabled: yes
+
+- name: Enable Cockpit Web Console
+  systemd:
+    name: cockpit
     state: started
     enabled: yes

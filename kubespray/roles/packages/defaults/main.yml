@@ -1,9 +1,13 @@
 ---
-package_remove:
+packages_remove:
   - docker
   - zram-generator
   - zram-generator-defaults
 packages_install:
+  - tar
+  - git
+  - vim
+  - tmux
   - lvm2
   - python3
   - haproxy
@@ -23,3 +27,15 @@ packages_install:
   - cockpit-bridge
   - cockpit-pcp
   - cockpit
+  - htop
+  - lnav
+  - grubby
+  - glances
+  - firewalld
+  - lm_sensors
+  - openvswitch
+  - python3-pip
+  - screenfetch
+  - kata-containers
+  - openvswitch-devel
+  - NetworkManager-ovs

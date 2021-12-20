@@ -22,7 +22,7 @@ No dependency on other Ansible Galaxy roles.
   var:
     packages_install:
       - vim
-    package_remove:
+    packages_remove:
       - nano
   roles:
     - role: hspaans.package

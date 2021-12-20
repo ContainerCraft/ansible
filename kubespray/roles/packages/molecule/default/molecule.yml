@@ -72,7 +72,7 @@ provisioner:
       all:
         packages_install:
           - zip
-        package_remove:
+        packages_remove:
           - bzip2
 verifier:
   name: testinfra

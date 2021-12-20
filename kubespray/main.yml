@@ -10,35 +10,6 @@
     vrrp_id: 42
     vrrp_nic: br0
     vrrp_address: 192.168.16.60/24
-    packages_install:
-      - tar
-      - git
-      - vim
-      - tmux
-      - htop
-      - lvm2
-      - lnav
-      - grubby
-      - haproxy
-      - glances
-      - python3
-      - iptables
-      - firewalld
-      - lm_sensors
-      - util-linux
-      - keepalived
-      - libibverbs
-      - openvswitch
-      - python3-pip
-      - screenfetch
-      - kata-containers
-      - openvswitch-devel
-      - NetworkManager-ovs
-      - NetworkManager-tui
-    packages_remove:
-      - zram-generator-defaults
-      - cockpit
-      - docker
   tasks:
 
   - name: Wait for cloud-init / user-data to finish
