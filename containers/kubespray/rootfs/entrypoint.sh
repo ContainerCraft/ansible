@@ -15,8 +15,8 @@ sleep 1
 
 /root/kubespray/contrib/inventory_builder/inventory.py ${IPS[@]}
 
-ansible-playbook $@ --extra-vars @/etc/ansible/vars.yml --become /root/.ansible/playbooks/kubespray-prep.yml || exit 1
-ansible-playbook $@ --extra-vars @/etc/ansible/vars.yml --become ./cluster.yml || ansible-playbook $@ --extra-vars @/etc/ansible/vars.yml --become ./cluster.yml
+ansible-playbook --extra-vars @/etc/ansible/vars.yml --become $@ /root/.ansible/playbooks/kubespray-prep.yml || exit 1
+ansible-playbook --extra-vars @/etc/ansible/vars.yml --become $@ ./cluster.yml || ansible-playbook $@ --extra-vars @/etc/ansible/vars.yml --become ./cluster.yml
 
 cat /etc/ansible/artifacts/admin.conf > /root/.kube/config
 kubectl scale deployment --replicas=0 dns-autoscaler --namespace=kube-system
