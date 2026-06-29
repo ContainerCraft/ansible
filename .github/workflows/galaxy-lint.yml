@@ -4,6 +4,7 @@ name: Galaxy Lint
 # lints at the production profile with galaxy metadata satisfied; a deploy tree
 # is a playbook repository whose own .ansible-lint.yml governs.
 on:
+  workflow_dispatch:
   pull_request:
     paths:
       - "collections/**"
