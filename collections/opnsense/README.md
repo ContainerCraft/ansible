@@ -102,7 +102,7 @@ it.
 
 ### Prerequisites
 
-- `ansible-core >= 2.14` and Python `>= 3.12` on the controller.
+- `ansible-core >= 2.17` and Python `>= 3.12` on the controller.
 - Network reachability to the firewall's HTTPS API.
 - An OPNsense user that can hold an API key. A dedicated service user is
   recommended over a human login.

@@ -45,4 +45,5 @@ jobs:
       - name: Install ansible + ansible-lint
         run: pip install -U -r requirements.txt
       - name: Lint ${{ matrix.target }}
-        run: ansible-lint "${{ matrix.target }}"
+        working-directory: ${{ matrix.target }}
+        run: ansible-lint .

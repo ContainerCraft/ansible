@@ -1,0 +1,5 @@
+---
+profile: production
+
+skip_list:
+  - 'var-naming[no-role-prefix]'
