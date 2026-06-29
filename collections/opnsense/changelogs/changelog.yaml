@@ -1,0 +1,13 @@
+---
+ancestor: null
+releases:
+  0.1.0:
+    release_date: "2026-06-28"
+    changes:
+      release_summary: >-
+        Initial release of the containercraft.opnsense collection. OPNsense
+        edge-router automation driven through the oxlorg.opnsense API
+        collection: phased migration model (coexist, migrating, hardening,
+        converged), declarative VLANs/interfaces, Unbound DNS, Kea DHCP,
+        zone-matrix firewall and outbound NAT, CARP/pfsync high availability,
+        legacy-segment decommission, and an SSH/root API-key bootstrap role.

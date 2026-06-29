@@ -1,0 +1,112 @@
+---
+# System baseline: sysctl tunables and identity (hostname/domain/timezone).
+#
+# The collection ships no wrapped module for these core controllers (endpoints
+# verified from opnsense/core 26.1):
+#   tunables: core/tunables/{searchItem,addItem,reconfigure}
+#   identity: core/initialsetup/{get,set,configure}
+#
+# Tunables are a Layer-2 RESOURCE (stable key: the tunable name) and are driven
+# with ansible.builtin.uri doing GET-diff -> POST, giving real idempotency and a
+# truthful changed_when. force_basic_auth is required: OPNsense API-key auth may
+# not return a 401 on the unauthenticated probe, so the Basic header must be sent
+# up front. validate_certs maps to ssl_verify.
+#
+# Identity is NOT a resource: core/initialsetup/configure has first-boot wizard
+# semantics (it clears trigger_initial_wizard and re-runs updateConfig), so it
+# stays on oxlorg.opnsense.raw, gated off by default (opnsense_apply_identity).
+# raw does not inherit module_defaults group/oxlorg.opnsense.all (raw is not in
+# the action_group), so it carries connection args explicitly from
+# opnsense_api_args.
+#
+# Neither uri nor raw POST runs in check mode; both are guarded by a prior GET
+# diff so a --check run is a safe no-op for this role.
+
+- name: Read current tunables
+  ansible.builtin.uri:
+    url: "https://{{ opnsense_api_args.firewall }}:{{ opnsense_api_args.api_port }}/api/core/tunables/searchItem"
+    method: GET
+    url_username: "{{ opnsense_api_args.api_key }}"
+    url_password: "{{ opnsense_api_args.api_secret }}"
+    force_basic_auth: true
+    validate_certs: "{{ opnsense_api_args.ssl_verify }}"
+    return_content: true
+    status_code: [200]
+  register: opn_system_tunables_now
+
+- name: Build current tunable name-to-value map
+  ansible.builtin.set_fact:
+    opn_system_tunables_existing: >-
+      {{ dict(opn_system_tunables_now.json.rows | default([]) | map(attribute='tunable') | list
+              | zip(opn_system_tunables_now.json.rows | default([]) | map(attribute='value') | list)) }}
+
+- name: Set sysctl tunables on drift
+  ansible.builtin.uri:
+    url: "https://{{ opnsense_api_args.firewall }}:{{ opnsense_api_args.api_port }}/api/core/tunables/addItem"
+    method: POST
+    url_username: "{{ opnsense_api_args.api_key }}"
+    url_password: "{{ opnsense_api_args.api_secret }}"
+    force_basic_auth: true
+    validate_certs: "{{ opnsense_api_args.ssl_verify }}"
+    body_format: json
+    body:
+      sysctl:
+        tunable: "{{ item.key }}"
+        value: "{{ item.value }}"
+        descr: "{{ opnsense_managed_tag }}"
+    status_code: [200]
+  loop: "{{ opnsense_tunables | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}={{ item.value }}"
+  when: opn_system_tunables_existing[item.key] | default('') != item.value
+  changed_when: true
+  notify: Reconfigure tunables
+
+- name: Read current system identity
+  oxlorg.opnsense.raw:
+    module: core
+    controller: initialsetup
+    command: get
+    action: get
+    firewall: "{{ opnsense_api_args.firewall }}"
+    api_key: "{{ opnsense_api_args.api_key }}"
+    api_secret: "{{ opnsense_api_args.api_secret }}"
+    api_port: "{{ opnsense_api_args.api_port }}"
+    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
+  register: opn_system_identity_now
+  when: opnsense_apply_identity | bool
+
+# Identity and WAN are set together through the initialsetup wizard model, which
+# core/initialsetup/configure applies atomically. The wizard's interfaces.wan
+# fields (ipv4_type, blockpriv, blockbogons, mtu) are the only API-driven path
+# to WAN configuration in OPNsense 26.1; there is no standalone interface IP
+# API. Both are gated behind opnsense_apply_identity (wizard semantics: configure
+# clears trigger_initial_wizard and re-runs the wizard's updateConfig).
+- name: Set system identity and WAN on drift
+  oxlorg.opnsense.raw:
+    module: core
+    controller: initialsetup
+    command: set
+    action: post
+    data:
+      wizard:
+        hostname: "{{ opnsense_hostname }}"
+        domain: "{{ opnsense_domain }}"
+        timezone: "{{ opnsense_timezone }}"
+        interfaces:
+          wan:
+            ipv4_type: "{{ opnsense_wan_ipv4_type }}"
+            blockpriv: "{{ opnsense_wan_block_private | ternary('1', '0') }}"
+            blockbogons: "{{ opnsense_wan_block_bogons | ternary('1', '0') }}"
+    firewall: "{{ opnsense_api_args.firewall }}"
+    api_key: "{{ opnsense_api_args.api_key }}"
+    api_secret: "{{ opnsense_api_args.api_secret }}"
+    api_port: "{{ opnsense_api_args.api_port }}"
+    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
+  when:
+    - opnsense_apply_identity | bool
+    - >-
+      (opn_system_identity_now.response.wizard.hostname | default('')) != opnsense_hostname or
+      (opn_system_identity_now.response.wizard.domain | default('')) != opnsense_domain or
+      (opn_system_identity_now.response.wizard.timezone | default('')) != opnsense_timezone
+  notify: Configure initial setup

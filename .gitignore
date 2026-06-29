@@ -1,2 +1,22 @@
-galaxy/*
-./galaxy/*
+# Galaxy collection build output
+build/
+*.tar.gz
+importer_result.json
+
+# Installed collections (ansible-galaxy install artifacts)
+**/.collections/
+**/collections/ansible_collections/
+!/collections/
+!/collections/**
+
+# Ansible runtime
+**/.ansible/
+**/*.retry
+
+# Operator values copy (per-deployment; .example and <box>_values.yml committed)
+**/vars/values.yml
+
+# Environment and secrets (.env.example committed)
+.env
+deploy/*/.env
+**/.direnv/

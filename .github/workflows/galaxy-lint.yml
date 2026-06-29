@@ -1,0 +1,47 @@
+name: Galaxy Lint
+
+# Lint every collection and every deploy tree on pull request. A collection
+# lints at the production profile with galaxy metadata satisfied; a deploy tree
+# is a playbook repository whose own .ansible-lint.yml governs.
+on:
+  pull_request:
+    paths:
+      - "collections/**"
+      - "deploy/**"
+      - ".github/workflows/galaxy-lint.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      targets: ${{ steps.find.outputs.targets }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Discover lint targets
+        id: find
+        run: |
+          targets=$(
+            { ls -d collections/*/ 2>/dev/null; ls -d deploy/*/ 2>/dev/null; } \
+              | sed 's:/*$::' | jq -R . | jq -cs .
+          )
+          echo "targets=$targets" >> "$GITHUB_OUTPUT"
+
+  lint:
+    needs: discover
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJson(needs.discover.outputs.targets) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: Install ansible + ansible-lint
+        run: pip install -U -r requirements.txt
+      - name: Lint ${{ matrix.target }}
+        run: ansible-lint "${{ matrix.target }}"

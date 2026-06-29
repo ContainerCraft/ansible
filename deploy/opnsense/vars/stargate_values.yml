@@ -1,0 +1,104 @@
+---
+# Stargate deployment values. Credentials from environment (.env / sesame).
+#
+# ITERATIVE ROLLOUT MODEL
+# -----------------------
+# Every optional/mutating capability below is explicitly DISABLED so the rollout
+# is minimal and scoped. Bring the network up a little at a time, two levers:
+#
+#   1. --tags  — run ONE role at a time (and always dry-run first):
+#        ansible-playbook site.yml --tags connect              # API reachability
+#        ansible-playbook site.yml --tags system  --check --diff
+#        ansible-playbook site.yml --tags system               # apply
+#        ansible-playbook site.yml --tags interfaces --check --diff
+#        ... dns | dhcp | firewall | ha | decommission
+#
+#   2. toggles below — flip one false->true, then re-run that role's tag with
+#      --check --diff, read the diff, then apply. One capability per iteration.
+#
+# network_phase is the master ordering gate (coexist -> migrating -> hardening ->
+# converged). Start at coexist: the new edge stands up beside the live LAN and
+# does NOT touch 10.0.0.0/24 (no zone DHCP, no legacy decommission).
+
+# =============================================================================
+# Migration posture — start safe, advance one phase at a time
+# =============================================================================
+# coexist:    zone VLANs/DNS up, NO zone DHCP, legacy LAN untouched   <-- START
+# migrating:  zone DHCP/DNS active, legacy LAN still served
+# hardening:  posture tightened, HA prepared, legacy still fallback
+# converged:  legacy-segment edge DHCP/DNS withdrawn
+network_phase: "{{ lookup('env', 'OPNSENSE_NETWORK_PHASE') | default('coexist', true) }}"
+
+# =============================================================================
+# API connection — from environment, do not inline secrets
+# =============================================================================
+opnsense_api_key: "{{ lookup('env', 'OPNSENSE_API_KEY') | default('', true) }}"
+opnsense_api_secret: "{{ lookup('env', 'OPNSENSE_API_SECRET') | default('', true) }}"
+opnsense_api_port: "{{ lookup('env', 'OPNSENSE_API_PORT') | default(443, true) }}"
+opnsense_ssl_verify: "{{ lookup('env', 'OPNSENSE_SSL_VERIFY') | default(false, true) | bool }}"
+
+# =============================================================================
+# Capability toggles — ALL DISABLED. Flip ONE at a time, re-run its role's tag.
+# =============================================================================
+
+# opn_system — apply hostname/domain/timezone + WAN via the initialsetup wizard.
+# DISABLED: wizard semantics re-run first-boot config; only enable deliberately,
+# and confirm WAN settings below match the modem-direct link before flipping.
+# Flip -> run: ansible-playbook site.yml --tags system --check --diff
+opnsense_apply_identity: false
+opnsense_hostname: "opnsense"
+opnsense_domain: "home.arpa"
+opnsense_timezone: "America/Los_Angeles"
+opnsense_wan_ipv4_type: "dhcp"
+opnsense_wan_block_private: true
+opnsense_wan_block_bogons: true
+
+# opn_interfaces — prepare trunk ports by removing them from an existing bridge.
+# DISABLED: this is a LIVE-network mutation (touches an existing bridge). Enable
+# only for a deliberate, sequenced cutover, with the bridge description and the
+# members to retain set below.
+# Flip -> run: ansible-playbook site.yml --tags interfaces --check --diff
+opnsense_prepare_trunk_ports: false
+opnsense_bridge_description: ""
+opnsense_bridge_keep_members: []
+
+# opn_interfaces — assign VLAN devices to interface slots (optN).
+# DISABLED: assignment alone does NOT set the per-interface IP (no REST endpoint
+# in 26.1), so it does not make a zone routable on its own. Enable only once the
+# per-interface IP addressing is handled, and provide the assignments below.
+# Flip -> run: ansible-playbook site.yml --tags interfaces --check --diff
+opnsense_assign_interfaces: false
+opnsense_interface_assignments: []
+
+# opn_dhcp — disable the default Dnsmasq DHCP before enabling Kea (they conflict
+# on the same interfaces).
+# DISABLED here so opn_dhcp makes no change until you reach the DHCP step; zone
+# DHCP itself is also gated by network_phase (off at coexist). Flip true when
+# bringing up Kea zone DHCP (migrating phase onward).
+# Flip -> run: ansible-playbook site.yml --tags dhcp --check --diff
+opnsense_enforce_dnsmasq_disabled: false
+
+# opn_ha — CARP VIPs, hasync config, peer sync trigger.
+# DISABLED: HA needs the dedicated SYNC zone and a second node. Enable only when
+# the HA peer is present and the SYNC segment is up.
+# Flip -> run: ansible-playbook site.yml --tags ha --check --diff
+opnsense_ha_enabled: false
+opnsense_carp_vhid_base: 1
+
+# opn_edge_decommission — require zero active leases on the cluster segment
+# before withdrawing legacy edge service. KEPT ON: this is a SAFETY gate, not a
+# capability — it prevents stranding devices. Leave true; the decommission role
+# only runs at network_phase=converged anyway.
+opnsense_require_zero_leases: true
+
+# =============================================================================
+# Sysctl tunables
+# =============================================================================
+opnsense_tunables:
+  net.inet.ip.forwarding: "1"
+  net.inet6.ip6.forwarding: "1"
+
+# =============================================================================
+# netspec overrides (deep-merged over shared/netspec/zones.yml; set only deviations)
+# =============================================================================
+netspec_overrides: {}

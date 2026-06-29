@@ -1,0 +1,82 @@
+---
+# opn_bootstrap_apikey — mint an OPNsense API key/secret over SSH (as root) and
+# write it to the gitignored .env for the API-driven site.yml to consume.
+#
+# This role is the INVERSE of the rest of the automation: connection: ssh +
+# become (root), operating on the box via PHP, NOT connection: local + REST API.
+# It exists to solve the bootstrap chicken-and-egg: site.yml needs an API key,
+# and minting one persists config.xml, which is root-gated. Run via bootstrap.yml,
+# not site.yml.
+#
+# createKey() generates the pair and persists the crypted secret; the plaintext
+# secret is returned ONCE. The mint script self-verifies the key count increased
+# (proving Config::save() ran with root privileges) and fails loudly otherwise.
+
+- name: Render the mint script to the box
+  ansible.builtin.template:
+    src: mint_apikey.php.j2
+    dest: "/tmp/konductor_mint_apikey.php"
+    mode: "0600"
+
+- name: Mint API key (root; persists config.xml)
+  ansible.builtin.command:
+    cmd: "php /tmp/konductor_mint_apikey.php"
+  become: true
+  register: opn_bootstrap_apikey_mint
+  changed_when: "'OPN_APIKEY_STATUS=created' in opn_bootstrap_apikey_mint.stdout"
+  failed_when: "'OPN_APIKEY_STATUS=error' in opn_bootstrap_apikey_mint.stdout or opn_bootstrap_apikey_mint.rc != 0"
+
+- name: Remove the mint script from the box
+  ansible.builtin.file:
+    path: "/tmp/konductor_mint_apikey.php"
+    state: absent
+  become: true
+
+- name: Parse mint output
+  ansible.builtin.set_fact:
+    opn_bootstrap_apikey_status: >-
+      {{ opn_bootstrap_apikey_mint.stdout_lines
+         | select('match', '^OPN_APIKEY_STATUS=') | first
+         | regex_replace('^OPN_APIKEY_STATUS=', '') }}
+    opn_bootstrap_apikey_key: >-
+      {{ (opn_bootstrap_apikey_mint.stdout_lines | select('match', '^OPN_APIKEY_KEY=') | list | first
+          | default('OPN_APIKEY_KEY=')) | regex_replace('^OPN_APIKEY_KEY=', '') }}
+    opn_bootstrap_apikey_secret: >-
+      {{ (opn_bootstrap_apikey_mint.stdout_lines | select('match', '^OPN_APIKEY_SECRET=') | list | first
+          | default('OPN_APIKEY_SECRET=')) | regex_replace('^OPN_APIKEY_SECRET=', '') }}
+
+- name: Report existing-key case (no new secret available)
+  ansible.builtin.debug:
+    msg: >-
+      User '{{ opn_bootstrap_apikey_user }}' already has an API key. Secrets are not
+      retrievable; the existing .env is unchanged. Re-run with
+      opn_bootstrap_apikey_force=true to mint a fresh key (the old one stays valid
+      until you revoke it).
+  when: opn_bootstrap_apikey_status == 'exists'
+
+# Write the minted pair to the gitignored .env. delegate_to localhost: the file
+# lives on the controller, not the box. The .envrc sources .env; the API-driven
+# site.yml reads OPNSENSE_API_KEY / OPNSENSE_API_SECRET from the environment.
+- name: Write minted credentials to .env (controller)
+  ansible.builtin.lineinfile:
+    path: "{{ opn_bootstrap_apikey_env_file }}"
+    regexp: "^{{ item.key }}="
+    line: "{{ item.key }}={{ item.value }}"
+    create: true
+    mode: "0600"
+  loop:
+    - { key: "OPNSENSE_API_KEY", value: "{{ opn_bootstrap_apikey_key }}" }
+    - { key: "OPNSENSE_API_SECRET", value: "{{ opn_bootstrap_apikey_secret }}" }
+  loop_control:
+    label: "{{ item.key }}"
+  delegate_to: localhost
+  no_log: true
+  when: opn_bootstrap_apikey_status == 'created'
+
+- name: Report success
+  ansible.builtin.debug:
+    msg: >-
+      API key minted for '{{ opn_bootstrap_apikey_user }}' and written to
+      {{ opn_bootstrap_apikey_env_file }} (gitignored). Re-source the environment
+      (direnv reload, or set -a; source .env) before running site.yml.
+  when: opn_bootstrap_apikey_status == 'created'

@@ -1,0 +1,59 @@
+---
+# Remove edge DHCP/DNS service from the legacy cluster segment. site.yml gates
+# this role on phase.decommission_legacy, true only at network_phase converged.
+# This is the only role that withdraws service from 10.0.0.0/24; after it the
+# segment is routed-only and addressing/resolution is owned downstream.
+#
+# Evidence gate: withdrawing the subnet while a device still holds an active
+# lease would strand it. Before removal, query active Kea leases on the cluster
+# interface and assert there are none. The leases API (kea/leases4/search)
+# returns stats.active = count of leases in state 0 (active); the assertion
+# fails loudly if any remain, so the phase gate is backed by measured evidence,
+# not just the phase value. Override opnsense_require_zero_leases to skip only with a
+# deliberate operator decision.
+
+- name: Query active Kea leases on the cluster segment
+  # Endpoint verified from opnsense/core 26.1 (Leases4Controller -> LeasesController
+  # ::searchAction, configd 'kea list leases4'). Response carries
+  # stats.{active,inactive,total}; active counts leases with state === 0.
+  # raw does not inherit the module_defaults group; pass connection args explicitly.
+  oxlorg.opnsense.raw:
+    module: kea
+    controller: leases4
+    command: search
+    action: get
+    firewall: "{{ opnsense_api_args.firewall }}"
+    api_key: "{{ opnsense_api_args.api_key }}"
+    api_secret: "{{ opnsense_api_args.api_secret }}"
+    api_port: "{{ opnsense_api_args.api_port }}"
+    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
+  register: opn_edge_decommission_leases
+  when:
+    - opnsense_require_zero_leases | bool
+    - not ansible_check_mode
+
+- name: Assert no active leases remain before withdrawing service
+  ansible.builtin.assert:
+    that:
+      - (opn_edge_decommission_leases.response.stats.active | default(0) | int) == 0
+    success_msg: "No active leases on the cluster segment; safe to decommission."
+    fail_msg: >-
+      {{ opn_edge_decommission_leases.response.stats.active | default('unknown') }} active
+      lease(s) remain on the cluster segment. Decommissioning would strand them.
+      Relocate remaining devices, or set opnsense_require_zero_leases=false to override.
+  when:
+    - opnsense_require_zero_leases | bool
+    - not ansible_check_mode
+
+- name: Remove legacy-segment Kea subnet
+  oxlorg.opnsense.dhcp_subnet:
+    subnet: "{{ netspec.zones.cluster.subnet }}"
+    match_fields: ["subnet"]
+    state: absent
+    reload: false
+  when: netspec.zones.cluster.subnet is defined
+
+- name: Apply Kea changes
+  oxlorg.opnsense.reload:
+    target: "kea"
+  when: not ansible_check_mode

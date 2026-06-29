@@ -1,0 +1,4 @@
+---
+# Node-specific identity for the primary edge router.
+# advskew 0 = CARP master (consumed when opnsense_ha_enabled).
+opnsense_carp_advskew: 0

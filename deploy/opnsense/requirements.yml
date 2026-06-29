@@ -1,0 +1,7 @@
+---
+# VERSION SYNC: oxlorg.opnsense version pinned here and in galaxy.yml + flake.nix
+collections:
+  - name: oxlorg.opnsense
+    version: "==25.7.8"
+  - name: ../../collections/opnsense
+    type: dir

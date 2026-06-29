@@ -1,0 +1,16 @@
+---
+# opn_bootstrap_apikey defaults.
+
+# User to mint the API key for. A dedicated service identity is recommended over
+# a human admin login (least-privilege, independently revocable); the user must
+# already exist on the box (create it in System -> Access -> Users, or via the
+# auth-user configctl action, before bootstrap).
+opn_bootstrap_apikey_user: "ansible"
+
+# Mint a fresh key even when the user already has one. Off by default so re-runs
+# are idempotent; existing keys are never auto-removed. Set true to rotate.
+opn_bootstrap_apikey_force: false
+
+# Where the minted key/secret are written on the controller. Gitignored; sourced
+# by .envrc and read by site.yml via lookup('env', ...).
+opn_bootstrap_apikey_env_file: "{{ playbook_dir }}/.env"

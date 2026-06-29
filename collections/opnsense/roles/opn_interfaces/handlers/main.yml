@@ -1,0 +1,16 @@
+---
+# Apply pending interface assignments (interface apply + filter reload).
+# uri, matching the Layer-2 assignment tasks. force_basic_auth required for
+# OPNsense API-key auth.
+- name: Reconfigure interface assignments
+  ansible.builtin.uri:
+    url: "https://{{ opnsense_api_args.firewall }}:{{ opnsense_api_args.api_port }}/api/interfaces/assignment/reconfigure"
+    method: POST
+    url_username: "{{ opnsense_api_args.api_key }}"
+    url_password: "{{ opnsense_api_args.api_secret }}"
+    force_basic_auth: true
+    validate_certs: "{{ opnsense_api_args.ssl_verify }}"
+    body_format: json
+    body: {}
+    status_code: [200]
+  when: not ansible_check_mode

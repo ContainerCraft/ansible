@@ -1,0 +1,106 @@
+{# mint_apikey.php.j2 — OPNsense API-key mint, run as root on the box.
+
+   Verified against OPNsense 26.1 source:
+     models/OPNsense/Auth/User.php             (getUserByName)
+     models/OPNsense/Auth/FieldTypes/ApiKeyField.php  (all/add/del/get)
+     library/OPNsense/Auth/API.php             (createKey/dropKey lifecycle)
+     library/OPNsense/Core/Config.php          (lock/save/unlock)
+
+   ApiKeyField::add() APPENDS a key (no dedup) and returns the plaintext
+   {key, secret} once; the secret is stored crypted and never retrievable again.
+   So idempotency and no-accumulation are enforced HERE, not by the model:
+
+     force=false, user already has >=1 key -> STATUS=exists, change nothing.
+     force=false, user has 0 keys         -> add one              -> STATUS=created.
+     force=true                           -> add a new key, then DELETE every
+                                             prior key for the user -> exactly one
+                                             key remains            -> STATUS=created.
+
+   Persistence mirrors API::createKey(): serializeToConfig + Config::save(),
+   inside a config lock. Root is required for the save to land.
+
+   Emits machine-parseable, prefixed lines on stdout:
+     OPN_APIKEY_STATUS=created|exists|error
+     OPN_APIKEY_KEY=<plaintext key>        (only when created)
+     OPN_APIKEY_SECRET=<plaintext secret>  (only when created)
+     OPN_APIKEY_COUNT=<keys for user, after>
+#}
+<?php
+error_reporting(E_ERROR | E_PARSE);
+require_once("config.inc");
+
+use OPNsense\Auth\User;
+use OPNsense\Core\Config;
+
+$username = "{{ opn_bootstrap_apikey_user | regex_replace('[^a-zA-Z0-9._-]', '') }}";
+$force = {{ opn_bootstrap_apikey_force | bool | ternary('true', 'false') }};
+
+$mdl = new User();
+$user = $mdl->getUserByName($username);
+if ($user === null) {
+    echo "OPN_APIKEY_STATUS=error\n";
+    fwrite(STDERR, "user '{$username}' does not exist on the box; create it first.\n");
+    exit(1);
+}
+
+# Existing keys for this user (verified: ApiKeyField::all()).
+$existing = $user->apikeys->all();
+
+# Idempotent: a key already exists and force not set -> do nothing. The secret of
+# an existing key is not retrievable, so re-minting is the only way to obtain a
+# usable secret; that is gated behind force, which also rotates (below) so keys
+# never accumulate.
+if (count($existing) > 0 && !$force) {
+    echo "OPN_APIKEY_STATUS=exists\n";
+    echo "OPN_APIKEY_COUNT=" . count($existing) . "\n";
+    exit(0);
+}
+
+Config::getInstance()->lock();
+
+# Mint a new key (verified: ApiKeyField::add() returns plaintext {key, secret}).
+$pair = $user->apikeys->add();
+if (empty($pair) || empty($pair['key']) || empty($pair['secret'])) {
+    Config::getInstance()->unlock();
+    echo "OPN_APIKEY_STATUS=error\n";
+    fwrite(STDERR, "apikeys->add() returned empty for user '{$username}'.\n");
+    exit(1);
+}
+
+# No accumulation: on force, delete every key that existed before this mint, so
+# exactly one (the new one) remains. Without force we only reach here when the
+# user had zero keys, so there is nothing to drop.
+foreach ($existing as $old) {
+    $user->apikeys->del($old['key']);
+}
+
+# Persist (mirrors API::createKey): serialize the model into config and save.
+$mdl->serializeToConfig(false, true);
+Config::getInstance()->save();
+Config::getInstance()->unlock();
+
+# Re-read persisted state with a fresh model to confirm the save landed and the
+# count is exactly one (verified: Config::forceReload() exists; User::getApiKeys()
+# returns per-key records merged with username).
+Config::getInstance()->forceReload();
+$after = new User();
+$count = 0;
+foreach ($after->getApiKeys() as $k) {
+    if ($k['username'] === $username) {
+        $count++;
+    }
+}
+
+if ($count < 1) {
+    echo "OPN_APIKEY_STATUS=error\n";
+    echo "OPN_APIKEY_COUNT={$count}\n";
+    fwrite(STDERR, "key generated but NOT persisted (count {$count}). "
+                 . "Config::save() needs root; ensure become:true.\n");
+    exit(1);
+}
+
+echo "OPN_APIKEY_STATUS=created\n";
+echo "OPN_APIKEY_KEY={$pair['key']}\n";
+echo "OPN_APIKEY_SECRET={$pair['secret']}\n";
+echo "OPN_APIKEY_COUNT={$count}\n";
+exit(0);

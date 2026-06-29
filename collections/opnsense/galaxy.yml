@@ -1,0 +1,33 @@
+---
+namespace: containercraft
+name: opnsense
+# Stamped from the <collection>-v<semver> git tag at publish; never hand-bumped.
+version: 0.0.0
+readme: README.md
+authors:
+  - ContainerCraft <opensource@containercraft.io>
+description: >-
+  OPNsense edge-router automation via the oxlorg.opnsense API collection.
+  Phased migration model, declarative VLANs/firewall/NAT/Kea/Unbound, HA.
+license:
+  - GPL-2.0-or-later
+tags:
+  - networking
+  - opnsense
+  - firewall
+  - nat
+  - dhcp
+  - dns
+  - vlan
+# VERSION SYNC: oxlorg.opnsense is pinned in three places:
+#   1. here (galaxy.yml — galaxy dependency resolution)
+#   2. deploy/opnsense/requirements.yml (deploy-layer install)
+#   3. flake.nix (nix devshell vendored collection)
+dependencies:
+  oxlorg.opnsense: "==25.7.8"
+repository: https://github.com/ContainerCraft/ansible
+documentation: https://github.com/ContainerCraft/ansible/tree/main/collections/opnsense
+homepage: https://github.com/ContainerCraft/ansible
+issues: https://github.com/ContainerCraft/ansible/issues
+build_ignore:
+  - "*.tar.gz"

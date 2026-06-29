@@ -1,0 +1,5 @@
+---
+# Capability toggles loaded by site.yml pre_tasks. The box values file overrides.
+opnsense_apply_identity: false
+opnsense_ha_enabled: false
+opnsense_enforce_dnsmasq_disabled: false

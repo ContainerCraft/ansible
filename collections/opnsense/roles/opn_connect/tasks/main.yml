@@ -1,0 +1,17 @@
+---
+# Verify API reachability before any mutating role. Read-only.
+# list returns {data: [...]}; a reachable API populates it.
+- name: List VLAN interfaces (read-only probe)
+  oxlorg.opnsense.list:
+    target: "interface_vlan"
+  register: opn_connect_api_probe
+
+- name: Assert API answered
+  ansible.builtin.assert:
+    that:
+      - opn_connect_api_probe is not failed
+      - "'data' in opn_connect_api_probe"
+    success_msg: "OPNsense API reachable at {{ opnsense_firewall_address }}"
+    fail_msg: >-
+      OPNsense API unreachable at {{ opnsense_firewall_address }}. Check OPNSENSE_API_KEY /
+      OPNSENSE_API_SECRET, ssl_verify, and that an API key exists on the firewall.

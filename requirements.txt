@@ -1,1 +1,2 @@
-ansible
+ansible-core>=2.14
+ansible-lint

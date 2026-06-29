@@ -1,0 +1,53 @@
+---
+# Unbound resolver and split-horizon forwarding.
+#
+# Kea does not register DHCP leases in Unbound dynamically; only static
+# reservations resolve. register_dhcp_static_mappings enables static-mapping
+# registration. unbound_forward is matched on (domain, target).
+
+- name: Enable Unbound resolver
+  oxlorg.opnsense.unbound_general:
+    enabled: true
+    port: 53
+    dnssec: true
+    register_dhcp_static_mappings: true
+    reload: false
+
+- name: Forward internal zone to cluster CoreDNS
+  oxlorg.opnsense.unbound_forward:
+    domain: "{{ netspec.cluster_domain }}"
+    target: "{{ netspec.cluster_dns }}"
+    port: 53
+    description: "{{ opnsense_managed_tag }} {{ netspec.cluster_domain }} to cluster dns"
+    state: present
+    enabled: true
+    reload: false
+
+# Static host reservations. Kea does not register leases in Unbound, so hosts
+# that must resolve by name are declared here as static overrides. Driven by
+# netspec.static_hosts (default empty): each entry has hostname, domain, value
+# (IP), and optional record_type (default A; choices A/AAAA/MX).
+#
+# unbound_host idempotency is a COMPOSITE key — its real default match_fields is
+# [hostname, domain, record_type, value, prio], not description. description is a
+# mutable field, not the key. match_fields is set explicitly (dropping prio,
+# which is MX-only and forced to None for A/AAAA) so re-runs match on the
+# host+record identity and an IP change is detected as a change, not a new entry.
+- name: Create static host reservations
+  oxlorg.opnsense.unbound_host:
+    hostname: "{{ item.hostname }}"
+    domain: "{{ item.domain | default(netspec.cluster_domain) }}"
+    record_type: "{{ item.record_type | default('A') }}"
+    value: "{{ item.value }}"
+    description: "{{ opnsense_managed_tag }} static {{ item.hostname }}"
+    match_fields: ["hostname", "domain", "record_type"]
+    state: present
+    reload: false
+  loop: "{{ netspec.static_hosts | default([]) }}"
+  loop_control:
+    label: "{{ item.hostname }}.{{ item.domain | default(netspec.cluster_domain) }} -> {{ item.value }}"
+
+- name: Apply Unbound changes
+  oxlorg.opnsense.reload:
+    target: "unbound"
+  when: not ansible_check_mode

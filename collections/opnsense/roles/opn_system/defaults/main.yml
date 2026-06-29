@@ -1,0 +1,27 @@
+---
+# --- Connection ---
+opnsense_firewall_address: "{{ lookup('env', 'OPNSENSE_FIREWALL') | default('', true) }}"
+opnsense_api_key: "{{ lookup('env', 'OPNSENSE_API_KEY') | default('', true) }}"
+opnsense_api_secret: "{{ lookup('env', 'OPNSENSE_API_SECRET') | default('', true) }}"
+opnsense_api_port: "{{ lookup('env', 'OPNSENSE_API_PORT') | default(443, true) }}"
+opnsense_ssl_verify: "{{ lookup('env', 'OPNSENSE_SSL_VERIFY') | default(false, true) | bool }}"
+opnsense_api_args:
+  firewall: "{{ opnsense_firewall_address }}"
+  api_key: "{{ opnsense_api_key }}"
+  api_secret: "{{ opnsense_api_secret }}"
+  api_port: "{{ opnsense_api_port }}"
+  ssl_verify: "{{ opnsense_ssl_verify }}"
+
+# --- System identity + WAN ---
+opnsense_apply_identity: "{{ lookup('env', 'OPNSENSE_APPLY_IDENTITY') | default(false, true) | bool }}"
+opnsense_hostname: "{{ lookup('env', 'OPNSENSE_HOSTNAME') | default('opnsense', true) }}"
+opnsense_domain: "{{ lookup('env', 'OPNSENSE_DOMAIN') | default('home.arpa', true) }}"
+opnsense_timezone: "{{ lookup('env', 'OPNSENSE_TIMEZONE') | default('UTC', true) }}"
+opnsense_wan_ipv4_type: "{{ lookup('env', 'OPNSENSE_WAN_IPV4_TYPE') | default('dhcp', true) }}"
+opnsense_wan_block_private: "{{ lookup('env', 'OPNSENSE_WAN_BLOCK_PRIVATE') | default(true, true) | bool }}"
+opnsense_wan_block_bogons: "{{ lookup('env', 'OPNSENSE_WAN_BLOCK_BOGONS') | default(true, true) | bool }}"
+
+# --- Sysctl tunables ---
+opnsense_tunables:
+  net.inet.ip.forwarding: "1"
+  net.inet6.ip6.forwarding: "1"

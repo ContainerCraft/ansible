@@ -1,0 +1,29 @@
+---
+# tunables/reconfigure restarts the login and sysctl services (uri; matches the
+# Layer-2 tunables tasks). initialsetup/configure stays raw (identity is gated,
+# wizard semantics). force_basic_auth required for OPNsense API-key auth.
+- name: Reconfigure tunables
+  ansible.builtin.uri:
+    url: "https://{{ opnsense_api_args.firewall }}:{{ opnsense_api_args.api_port }}/api/core/tunables/reconfigure"
+    method: POST
+    url_username: "{{ opnsense_api_args.api_key }}"
+    url_password: "{{ opnsense_api_args.api_secret }}"
+    force_basic_auth: true
+    validate_certs: "{{ opnsense_api_args.ssl_verify }}"
+    body_format: json
+    body: {}
+    status_code: [200]
+  when: not ansible_check_mode
+
+- name: Configure initial setup
+  oxlorg.opnsense.raw:
+    module: core
+    controller: initialsetup
+    command: configure
+    action: post
+    firewall: "{{ opnsense_api_args.firewall }}"
+    api_key: "{{ opnsense_api_args.api_key }}"
+    api_secret: "{{ opnsense_api_args.api_secret }}"
+    api_port: "{{ opnsense_api_args.api_port }}"
+    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
+  when: not ansible_check_mode

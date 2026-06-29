@@ -1,0 +1,30 @@
+---
+# ansible-lint configuration for the OPNsense edge automation.
+#
+# The skipped rules are false positives for this codebase, not relaxations:
+#
+#   args[module] (experimental) cannot resolve the required `firewall` and
+#   credential arguments because they are supplied once per play via
+#   module_defaults (group/oxlorg.opnsense.all), not on each task. The arguments
+#   are present; the rule does not evaluate module_defaults groups.
+#
+#   fqcn[canonical] flags the oxlorg.opnsense module aliases as non-canonical.
+#
+#   galaxy[no-changelog] / galaxy[no-runtime] demand changelogs/changelog.yaml
+#   and meta/runtime.yml, which are publishable-collection requirements. This is
+#   a playbook repository; galaxy.yml exists only to declare the oxlorg.opnsense
+#   dependency, not to publish a collection. The rules misclassify the repo.
+#
+# The oxlorg.opnsense collection this automation consumes skips the first two
+# rules for the same reasons. All other rules pass at the production profile.
+
+profile: production
+
+skip_list:
+  - 'args[module]'        # arguments supplied via module_defaults group, not per-task
+  - 'fqcn[canonical]'     # module aliases (oxlorg.opnsense.*)
+  - 'galaxy[no-changelog]' # playbook repo, not a publishable collection
+  - 'galaxy[no-runtime]'   # playbook repo, not a publishable collection
+
+exclude_paths:
+  - 'tests/'

@@ -1,0 +1,31 @@
+---
+# shared/netspec/firewall_matrix.yml — zone-to-zone policy as data.
+# opn_firewall renders each row into an oxlorg.opnsense.rule entry. from/to are
+# zone keys; the role resolves them to interface names and network aliases.
+# Rules are matched on description (match_fields: [description]); descriptions
+# are prefixed and unique per row.
+
+firewall_matrix:
+  # Per-zone egress to the internet (NAT handled by opn_firewall nat_source).
+  wan_egress:
+    - {from: mgmt, to: wan, action: pass, proto: any, desc: "mgmt to internet"}
+    - {from: iot, to: wan, action: pass, proto: any, desc: "iot to internet"}
+    - {from: dmz, to: wan, action: pass, proto: any, desc: "dmz to internet"}
+    - {from: cluster, to: wan, action: pass, proto: any, desc: "cluster to internet"}
+
+  # Inter-zone isolation. IoT has no lateral access.
+  isolation:
+    - {from: iot, to: mgmt, action: block, proto: any, desc: "iot deny mgmt"}
+    - {from: iot, to: cluster, action: block, proto: any, desc: "iot deny cluster"}
+    - {from: dmz, to: mgmt, action: block, proto: any, desc: "dmz deny mgmt"}
+    - {from: dmz, to: cluster, action: block, proto: any, desc: "dmz deny cluster"}
+
+  # Explicit allows overriding isolation. mgmt reaches all zones; every zone
+  # reaches the cluster DNS resolver.
+  allows:
+    - {from: mgmt, to: cluster, action: pass, proto: any, desc: "mgmt to cluster"}
+    - {from: mgmt, to: dmz, action: pass, proto: any, desc: "mgmt to dmz"}
+    - {from: mgmt, to: iot, action: pass, proto: any, desc: "mgmt to iot"}
+    - {from: mgmt, to: cluster_dns, action: pass, proto: "TCP/UDP", port: 53, desc: "mgmt to dns"}
+    - {from: iot, to: cluster_dns, action: pass, proto: "TCP/UDP", port: 53, desc: "iot to dns"}
+    - {from: dmz, to: cluster_dns, action: pass, proto: "TCP/UDP", port: 53, desc: "dmz to dns"}

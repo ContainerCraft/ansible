@@ -1,0 +1,17 @@
+---
+# Deploy wiring: data-file locations and phase posture.
+# Role-level defaults live in the collection (collections/opnsense/roles/*/defaults/).
+
+# --- Data-file locations ---
+netspec_file: "{{ playbook_dir }}/../../shared/netspec/zones.yml"
+phases_file: "{{ playbook_dir }}/../../shared/netspec/phases.yml"
+firewall_matrix_file: "{{ playbook_dir }}/../../shared/netspec/firewall_matrix.yml"
+run_file: "{{ playbook_dir }}/vars/run.yml"
+# Operator values file; the box entrypoint overrides this to its own vars file.
+values_file: "{{ playbook_dir }}/vars/values.example.yml"
+
+# --- Migration posture ---
+network_phase: "{{ lookup('env', 'OPNSENSE_NETWORK_PHASE') | default('coexist', true) }}"
+
+# --- netspec overrides ---
+netspec_overrides: {}

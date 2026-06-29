@@ -1,0 +1,104 @@
+---
+# shared/netspec/zones.yml — network structure and default values.
+# Operator overrides merge from opnsense/vars/values.yml via combine(recursive=True).
+# Roles consume netspec.* as data; no literal subnets/tags/IPs in role tasks.
+
+netspec:
+  wan_interface: "wan" # OPNsense interface name assigned to re0
+  native_blackhole_vlan: 3999 # native/untagged trunk VLAN; carries no IPs, deny-all
+
+  cluster_dns: "10.0.0.51" # CoreDNS LoadBalancer on the cluster segment
+  cluster_domain: "home.arpa" # internal split-horizon zone
+
+  # Static host reservations resolved by Unbound (Kea does not register leases).
+  # Each entry: hostname, value (IP); optional domain (default cluster_domain)
+  # and record_type (default A). Operator-populated; empty by default.
+  static_hosts: []
+
+  # Trunks. Each trunk is a physical OPNsense port carrying tagged zone VLANs to
+  # one switch / power domain. Built on currently-unused ports (em2, em3); the
+  # live flat LAN stays on em0/em1 until the switch cables are moved to these
+  # trunk ports at cutover. A zone declares which trunks it rides; opn_interfaces
+  # creates the zone VLAN sub-interface on each listed trunk parent.
+  trunks:
+    qnap: # cluster + infrastructure power domain (QNAP switch)
+      parent: "em2"
+      domain: cluster
+    poe: # AP / WiFi power domain (POE switch); separate UPS domain
+      parent: "em3"
+      domain: ap
+
+  # Zone dictionary. Add a zone by adding a block in values.yml; set enabled:false
+  # to exclude one. tagged VLANs ride the listed trunks; the native VLAN per
+  # trunk is the blackhole. trunks: lists which power domains a zone reaches.
+  zones:
+    transit:
+      enabled: true
+      vlan: 1
+      tagged: true # carried as a tagged VLAN, not the native VLAN
+      trunks: [qnap] # routed core to downstream gateways
+      role: transit
+      dhcp: false # routed transit, no client addressing
+      client_ips: false
+      description: "TRANSIT core - OPNsense <-> downstream gateways, routed only"
+
+    mgmt:
+      enabled: true
+      vlan: 10
+      tagged: true
+      trunks: [qnap, poe] # wired infra (QNAP) + management WiFi (POE)
+      role: zone
+      subnet: "10.10.0.0/24"
+      gateway: "10.10.0.1"
+      dhcp: true
+      dhcp_pool: "10.10.0.100 - 10.10.0.200"
+      description: "MGMT - infrastructure management"
+
+    iot:
+      enabled: true
+      vlan: 20
+      tagged: true
+      trunks: [qnap, poe] # wired + WiFi IoT
+      role: zone
+      subnet: "10.20.0.0/24"
+      gateway: "10.20.0.1"
+      dhcp: true
+      dhcp_pool: "10.20.0.100 - 10.20.0.200"
+      description: "IoT - isolated devices"
+
+    dmz:
+      enabled: true
+      vlan: 30
+      tagged: true
+      trunks: [qnap, poe] # wired + WiFi DMZ
+      role: zone
+      subnet: "10.30.0.0/24"
+      gateway: "10.30.0.1"
+      dhcp: true
+      dhcp_pool: "10.30.0.100 - 10.30.0.200"
+      description: "DMZ - externally reachable services"
+
+    cluster:
+      enabled: true
+      vlan: 0
+      tagged: false # existing untagged LAN segment
+      trunks: [qnap] # cluster + infra power domain only
+      role: cluster
+      subnet: "10.0.0.0/24"
+      gateway: "10.0.0.1" # OPNsense LAN address
+      dhcp: false # Cilium/Talos own addressing and L2 VIPs
+      client_ips: true
+      description: "CLUSTER - optiplexprime Talos/KubeVirt"
+
+    sync:
+      enabled: true
+      vlan: 4000
+      tagged: true
+      trunks: [qnap] # HA state replication on the cluster domain
+      role: sync # dedicated pfsync/CARP state-sync segment
+      subnet: "10.40.0.0/24"
+      gateway: "10.40.0.1"
+      peer: "10.40.0.2" # backup node's sync address
+      dhcp: false
+      client_ips: false
+      description: "SYNC - dedicated pfsync state replication"

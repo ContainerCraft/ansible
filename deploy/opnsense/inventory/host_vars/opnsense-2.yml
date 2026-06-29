@@ -1,0 +1,4 @@
+---
+# Node-specific identity for the secondary edge router (HA).
+# advskew > 0 = CARP backup. Added to the inventory when opnsense_ha_enabled.
+opnsense_carp_advskew: 100

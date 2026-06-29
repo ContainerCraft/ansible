@@ -1,0 +1,106 @@
+---
+# Per-zone firewall rules and outbound NAT, savepoint-wrapped.
+#
+# Savepoint covers the filter controller (filter rules and source_nat share it).
+# Sequence: savepoint create -> mutate -> reload -> verify connectivity ->
+# cancel_rollback. If verification fails or cancel_rollback is not reached, the
+# server-side 60-second timer reverts the filter section. apply and
+# cancel_rollback stay within that window. savepoint create returns no revision
+# in check mode, so the commit step is guarded.
+#
+# rule requires match_fields; matched on description (unique per row). rule
+# interface is a list. reload deferred to one call per target.
+#
+# Outbound NAT is NOT automated here: OPNsense ships automatic outbound NAT,
+# which already masquerades each zone subnet to the WAN address (DHCP-safe, no
+# rules). The oxlorg.opnsense.nat_source module requires a concrete target IP
+# (see its tests — always an explicit address) and does not express interface-
+# address masquerade, so manual SNAT here would only duplicate the automatic
+# behavior. Add explicit nat_source rules only for specific source translations
+# that must override automatic NAT.
+#
+# Rules reference network aliases by name (<zone>_net) and a cluster_dns host
+# alias. The aliases are created here first; the rules match them by name. alias
+# is matched on name; aliases are not part of the filter savepoint controller,
+# so they are created and reloaded ahead of the savepoint-wrapped rule block.
+
+- name: Create per-zone network aliases
+  oxlorg.opnsense.alias:
+    name: "{{ item.key }}_net"
+    type: network
+    content: ["{{ item.value.subnet }}"]
+    description: "{{ opnsense_managed_tag }} zone net {{ item.key }}"
+    state: present
+    reload: false
+  loop: "{{ netspec.zones | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}_net"
+  when:
+    - item.value.enabled | default(true) | bool
+    - item.value.subnet is defined
+
+- name: Create cluster DNS host alias
+  oxlorg.opnsense.alias:
+    name: cluster_dns
+    type: host
+    content: ["{{ netspec.cluster_dns }}"]
+    description: "{{ opnsense_managed_tag }} cluster DNS resolver"
+    state: present
+    reload: false
+  when: netspec.cluster_dns is defined
+
+- name: Apply alias changes
+  oxlorg.opnsense.reload:
+    target: "alias"
+  when: not ansible_check_mode
+
+- name: Create firewall savepoint
+  oxlorg.opnsense.savepoint:
+    action: create
+    controller: filter
+  register: opn_firewall_savepoint
+  when: not ansible_check_mode
+
+- name: Flatten firewall matrix rows
+  ansible.builtin.set_fact:
+    opn_firewall_rules: >-
+      {{ (firewall_matrix.wan_egress | default([]))
+         + (firewall_matrix.isolation | default([]))
+         + (firewall_matrix.allows | default([])) }}
+
+- name: Apply zone firewall rules
+  oxlorg.opnsense.rule:
+    interface: ["{{ item.from }}"]
+    action: "{{ item.action }}"
+    protocol: "{{ item.proto | default('any') }}"
+    source_net: "{{ item.from }}_net"
+    destination_net: "{{ 'any' if item.to == 'wan' else (item.to if item.to == 'cluster_dns' else item.to ~ '_net') }}"
+    destination_port: "{{ item.port | default('') }}"
+    description: "{{ opnsense_managed_tag }} {{ item.desc }}"
+    match_fields: ["description"]
+    state: present
+    reload: false
+  loop: "{{ opn_firewall_rules }}"
+  loop_control:
+    label: "{{ item.desc }}"
+
+- name: Apply firewall rule changes
+  oxlorg.opnsense.reload:
+    target: "rule"
+  when: not ansible_check_mode
+
+- name: Verify API still reachable after firewall apply
+  oxlorg.opnsense.list:
+    target: "rule"
+  register: opn_firewall_verify
+  when: not ansible_check_mode
+
+- name: Commit firewall changes (cancel auto-rollback)
+  oxlorg.opnsense.savepoint:
+    action: cancel_rollback
+    controller: filter
+    revision: "{{ opn_firewall_savepoint.revision }}"
+  when:
+    - not ansible_check_mode
+    - opn_firewall_savepoint.revision is defined
+    - opn_firewall_verify is not failed

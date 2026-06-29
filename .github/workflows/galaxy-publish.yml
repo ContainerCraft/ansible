@@ -1,0 +1,74 @@
+name: Galaxy Publish
+
+# A collection is published by pushing a tag named <collection>-v<semver>.
+# The tag names its collection unambiguously; one tag publishes exactly one
+# collection at exactly one version. No CI edit is needed to ship a new
+# collection — only a collections/<name>/ directory and a matching tag.
+on:
+  push:
+    tags:
+      - "*-v*"
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Parse tag -> collection + version
+        id: parse
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          collection="${tag%-v*}"
+          version="${tag##*-v}"
+          if [ -z "$collection" ] || [ -z "$version" ] || [ "$collection" = "$tag" ]; then
+            echo "::error::tag '$tag' is not of the form <collection>-v<semver>"
+            exit 1
+          fi
+          if [ ! -f "collections/$collection/galaxy.yml" ]; then
+            echo "::error::collections/$collection/galaxy.yml does not exist"
+            exit 1
+          fi
+          echo "collection=$collection" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install ansible + ansible-lint
+        run: pip install -U -r requirements.txt
+
+      - name: Stamp version into galaxy.yml
+        env:
+          COLLECTION: ${{ steps.parse.outputs.collection }}
+          VERSION: ${{ steps.parse.outputs.version }}
+        run: |
+          sed -i -E "s/^version:.*/version: ${VERSION}/" "collections/${COLLECTION}/galaxy.yml"
+          grep -E "^version:" "collections/${COLLECTION}/galaxy.yml"
+
+      - name: Lint collection (production profile)
+        env:
+          COLLECTION: ${{ steps.parse.outputs.collection }}
+        run: ansible-lint "collections/${COLLECTION}"
+
+      - name: Build collection
+        env:
+          COLLECTION: ${{ steps.parse.outputs.collection }}
+        run: |
+          mkdir -p build
+          ansible-galaxy collection build "collections/${COLLECTION}" --output-path build
+
+      - name: Publish collection
+        env:
+          COLLECTION: ${{ steps.parse.outputs.collection }}
+          VERSION: ${{ steps.parse.outputs.version }}
+        run: |
+          ansible-galaxy collection publish \
+            "build/containercraft-${COLLECTION}-${VERSION}.tar.gz" \
+            --api-key="${{ secrets.ANSIBLE_GALAXY_API_KEY }}"

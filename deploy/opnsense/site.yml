@@ -1,0 +1,100 @@
+---
+# ContainerCraft | opnsense | site.yml
+# Edge-router automation. Runs locally against each firewall's REST API.
+#
+#   ansible-galaxy collection install -r requirements.yml
+#   ansible-playbook site.yml --check          # dry-run (wrapped modules)
+#   ansible-playbook site.yml                   # apply
+#   ansible-playbook site.yml --tags dns        # single concern
+#
+# module_defaults group/oxlorg.opnsense.all sets the connection contract once;
+# param names match the collection's OPN_MOD_ARGS spec.
+- name: "ContainerCraft | opnsense | edge router"
+  hosts: opnsense_nodes
+  gather_facts: false
+
+  module_defaults:
+    group/oxlorg.opnsense.all:
+      firewall: "{{ opnsense_firewall_address }}"
+      api_key: "{{ opnsense_api_key }}"
+      api_secret: "{{ opnsense_api_secret }}"
+      api_port: "{{ opnsense_api_port }}"
+      ssl_verify: "{{ opnsense_ssl_verify }}"
+
+  pre_tasks:
+    # Required, committed data files: netspec structure, phase map, firewall
+    # matrix, and capability toggles. Always present.
+    - name: Load netspec, phases, firewall matrix, toggles
+      ansible.builtin.include_vars: "{{ item }}"
+      loop:
+        - "{{ netspec_file }}"
+        - "{{ phases_file }}"
+        - "{{ firewall_matrix_file }}"
+        - "{{ run_file }}"
+      tags: [always]
+
+    # Operator values are optional: vars/values.yml is gitignored and may be
+    # absent on a fresh checkout (copy from values.example.yml). The environment
+    # (.env / sesame) can supply every value, so a missing file is not fatal —
+    # load it only when present.
+    - name: Load operator values if present
+      ansible.builtin.include_vars: "{{ values_file }}"
+      when: values_file is exists
+      tags: [always]
+
+    - name: Merge operator overrides onto netspec
+      ansible.builtin.set_fact:
+        netspec: "{{ netspec | combine(netspec_overrides | default({}), recursive=True) }}"
+      tags: [always]
+
+    - name: Resolve phase capability defaults
+      ansible.builtin.set_fact:
+        phase: "{{ phase_defaults[network_phase] }}"
+      tags: [always]
+
+  tasks:
+    - name: API connectivity check
+      ansible.builtin.import_role:
+        name: containercraft.opnsense.opn_connect
+      tags: [connect, always]
+
+    - name: System baseline (tunables, identity)
+      ansible.builtin.import_role:
+        name: containercraft.opnsense.opn_system
+      tags: [system]
+
+    - name: Interfaces (single-NIC trunk VLANs, native blackhole)
+      ansible.builtin.import_role:
+        name: containercraft.opnsense.opn_interfaces
+      tags: [interfaces, vlans]
+
+    - name: DNS (Unbound, split-horizon forward)
+      ansible.builtin.import_role:
+        name: containercraft.opnsense.opn_dns
+      tags: [dns, unbound]
+
+    - name: DHCP (Kea per-zone scopes)
+      ansible.builtin.import_role:
+        name: containercraft.opnsense.opn_dhcp
+      tags: [dhcp, kea]
+
+    - name: Firewall (zone matrix + NAT, savepoint-wrapped)
+      ansible.builtin.import_role:
+        name: containercraft.opnsense.opn_firewall
+      tags: [firewall, nat]
+
+    - name: HA (CARP VIPs, hasync, sync trigger)
+      ansible.builtin.include_role:
+        name: containercraft.opnsense.opn_ha
+        apply:
+          tags: [ha]
+      when: opnsense_ha_enabled | bool
+      tags: [ha]
+
+    - name: Decommission legacy-segment edge services (converged only)
+      ansible.builtin.include_role:
+        name: containercraft.opnsense.opn_edge_decommission
+        apply:
+          tags: [decommission]
+      when: phase.decommission_legacy | bool
+      tags: [decommission]

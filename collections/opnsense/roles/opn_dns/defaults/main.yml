@@ -1,0 +1,23 @@
+---
+# --- Connection ---
+opnsense_firewall_address: "{{ lookup('env', 'OPNSENSE_FIREWALL') | default('', true) }}"
+opnsense_api_key: "{{ lookup('env', 'OPNSENSE_API_KEY') | default('', true) }}"
+opnsense_api_secret: "{{ lookup('env', 'OPNSENSE_API_SECRET') | default('', true) }}"
+opnsense_api_port: "{{ lookup('env', 'OPNSENSE_API_PORT') | default(443, true) }}"
+opnsense_ssl_verify: "{{ lookup('env', 'OPNSENSE_SSL_VERIFY') | default(false, true) | bool }}"
+opnsense_api_args:
+  firewall: "{{ opnsense_firewall_address }}"
+  api_key: "{{ opnsense_api_key }}"
+  api_secret: "{{ opnsense_api_secret }}"
+  api_port: "{{ opnsense_api_port }}"
+  ssl_verify: "{{ opnsense_ssl_verify }}"
+
+# --- Apply discipline ---
+opnsense_reload: false
+opnsense_managed_tag: "{{ lookup('env', 'OPNSENSE_MANAGED_TAG') | default('ansible-managed', true) }}"
+
+# --- DNS data fallback ---
+netspec:
+  cluster_domain: "home.arpa"
+  cluster_dns: ""
+  static_hosts: []

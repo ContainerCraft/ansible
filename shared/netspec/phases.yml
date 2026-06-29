@@ -1,0 +1,34 @@
+---
+# shared/netspec/phases.yml — network_phase to capability defaults.
+# network_phase is monotonic: coexist -> migrating -> hardening -> converged.
+# decommission_legacy is true only at converged; the edge_decommission role
+# gates on it, so legacy-segment services are removed only after migration.
+
+phase_defaults:
+  # New edge stands up beside the live LAN. No DHCP into new zones (no clients
+  # yet). The 10.0.0.0/24 segment is untouched.
+  coexist:
+    zone_dhcp: false
+    edge_serves_legacy_lan: true
+    decommission_legacy: false
+
+  # Devices relocate into new zones. Per-zone DHCP/DNS active. Legacy segment
+  # still served while clients straddle old and new.
+  migrating:
+    zone_dhcp: true
+    edge_serves_legacy_lan: true
+    decommission_legacy: false
+
+  # Clients relocated. Firewall posture tightened; CARP/pfsync prepared. Legacy
+  # segment still served as the last fallback.
+  hardening:
+    zone_dhcp: true
+    edge_serves_legacy_lan: true
+    decommission_legacy: false
+
+  # Migration complete. edge_decommission removes DHCP/DNS from 10.0.0.0/24;
+  # that segment becomes routed-only.
+  converged:
+    zone_dhcp: true
+    edge_serves_legacy_lan: false
+    decommission_legacy: true

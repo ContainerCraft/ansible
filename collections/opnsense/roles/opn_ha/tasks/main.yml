@@ -1,0 +1,81 @@
+---
+# CARP VIPs, HA config sync, and the sync trigger. site.yml gates on opnsense_ha_enabled.
+#
+# interface_vip default mode is ipalias; mode carp is required for HA. vhid is
+# unique per zone (base + vlan). advertising_skew is the per-node identity
+# (0 master, higher backup) from host_vars. The VIP prefix is derived from each
+# zone's subnet, not assumed.
+#
+# hasync_general has no enabled field; HA enables implicitly via
+# pfsync_interface. preempt maps to the inverted API field disablepreempt.
+# synchronize_to_ip is set on the master only. pfsync uses the dedicated SYNC
+# zone interface and the backup's SYNC address (netspec.zones.sync.peer).
+#
+# hasync_general configures settings; it does not push to the backup.
+# core/hasync_status/restart_all performs the config sync (exec_sync,
+# reload_templates) and restarts HA services on the peer.
+
+- name: Assert dedicated SYNC zone exists for pfsync
+  ansible.builtin.assert:
+    that:
+      - netspec.zones.sync is defined
+      - netspec.zones.sync.enabled | bool
+      - netspec.zones.sync.peer is defined
+    fail_msg: >-
+      HA requires a dedicated SYNC zone (netspec.zones.sync with a peer address).
+      pfsync must not ride the data trunk.
+
+- name: Create CARP VIP per zone gateway
+  oxlorg.opnsense.interface_vip:
+    interface: "{{ item.key }}"
+    address: "{{ item.value.gateway }}/{{ item.value.subnet.split('/')[1] }}"
+    mode: carp
+    vhid: "{{ opnsense_carp_vhid_base + item.value.vlan }}"
+    advertising_base: 1
+    advertising_skew: "{{ opnsense_carp_advskew | default(0) }}"
+    password: "{{ opnsense_carp_password }}"
+    description: "{{ opnsense_managed_tag }} carp {{ item.key }}"
+    match_fields: ["description"]
+    state: present
+    reload: false
+  loop: "{{ netspec.zones | dict2items }}"
+  loop_control:
+    label: "carp {{ item.key }}"
+  when:
+    - item.value.enabled | default(true) | bool
+    - item.value.role == 'zone'
+    - item.value.gateway is defined
+    - item.value.subnet is defined
+
+- name: Apply VIP changes
+  oxlorg.opnsense.reload:
+    target: "interface_vip"
+  when: not ansible_check_mode
+
+- name: Configure HA synchronization
+  oxlorg.opnsense.hasync_general:
+    pfsync_interface: "sync"
+    pfsync_peer_ip: "{{ netspec.zones.sync.peer }}"
+    pfsync_version: "1400"
+    synchronize_to_ip: "{{ netspec.zones.sync.peer if (opnsense_carp_advskew | default(0) | int == 0) else '' }}"
+    username: "{{ opnsense_hasync_username }}"
+    password: "{{ opnsense_hasync_password }}"
+    syncitems: "{{ opnsense_hasync_syncitems }}"
+
+- name: Push config sync and restart HA services on the peer
+  # raw does not inherit the module_defaults group; pass connection args
+  # explicitly. core/hasync_status/restart_all runs exec_sync + reload_templates
+  # then restarts each HA service on the peer (verified opnsense/core 26.1).
+  oxlorg.opnsense.raw:
+    module: core
+    controller: hasync_status
+    command: restart_all
+    action: post
+    firewall: "{{ opnsense_api_args.firewall }}"
+    api_key: "{{ opnsense_api_args.api_key }}"
+    api_secret: "{{ opnsense_api_args.api_secret }}"
+    api_port: "{{ opnsense_api_args.api_port }}"
+    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
+  when:
+    - opnsense_carp_advskew | default(0) | int == 0
+    - not ansible_check_mode

@@ -1,0 +1,35 @@
+---
+# Example operator values. Credentials from the environment.
+
+# Migration posture: coexist | migrating | hardening | converged
+network_phase: "{{ lookup('env', 'OPNSENSE_NETWORK_PHASE') | default('coexist', true) }}"
+
+# API connection
+opnsense_api_key: "{{ lookup('env', 'OPNSENSE_API_KEY') }}"
+opnsense_api_secret: "{{ lookup('env', 'OPNSENSE_API_SECRET') }}"
+opnsense_api_port: "{{ lookup('env', 'OPNSENSE_API_PORT') | default(443, true) }}"
+opnsense_ssl_verify: "{{ lookup('env', 'OPNSENSE_SSL_VERIFY') | default(false, true) | bool }}"
+
+# System identity (gated by opnsense_apply_identity)
+opnsense_hostname: "{{ lookup('env', 'OPNSENSE_HOSTNAME') | default('opnsense', true) }}"
+opnsense_domain: "{{ lookup('env', 'OPNSENSE_DOMAIN') | default('home.arpa', true) }}"
+opnsense_timezone: "{{ lookup('env', 'OPNSENSE_TIMEZONE') | default('America/Los_Angeles', true) }}"
+
+# Sysctl tunables
+opnsense_tunables:
+  net.inet.ip.forwarding: "1"
+  net.inet6.ip6.forwarding: "1"
+
+# netspec overrides, deep-merged over shared/netspec/zones.yml.
+# Set only the leaves that deviate for this deployment; unset keys inherit from
+# the shared data. Do not mirror defaults here — a copied snapshot silently
+# diverges when the shared data changes.
+#
+# Examples (uncomment and edit only what deviates):
+#   netspec_overrides:
+#     cluster_dns: "10.0.0.51"            # CoreDNS VIP for this deployment
+#     zones:
+#       mgmt: {subnet: "10.10.0.0/24", gateway: "10.10.0.1", dhcp_pool: "10.10.0.100 - 10.10.0.200"}
+#       iot:  {subnet: "10.20.0.0/24", gateway: "10.20.0.1", dhcp_pool: "10.20.0.100 - 10.20.0.200"}
+#       dmz:  {subnet: "10.30.0.0/24", gateway: "10.30.0.1", dhcp_pool: "10.30.0.100 - 10.30.0.200"}
+netspec_overrides: {}

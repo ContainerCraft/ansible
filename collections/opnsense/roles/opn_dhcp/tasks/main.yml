@@ -1,0 +1,52 @@
+---
+# Kea DHCPv4, per-zone scopes. Runs only when the phase serves zone DHCP.
+# Not on the transit zone, not on the cluster segment.
+#
+# dhcp_subnet is matched on subnet. dhcp_general is a single settings object;
+# fw_rules false so Kea does not inject implicit firewall rules that would
+# compete with opn_firewall. A fresh 26.1 install enables Dnsmasq DHCP by
+# default, which conflicts with Kea on the same interfaces.
+
+- name: Disable Dnsmasq DHCP (conflicts with Kea)
+  oxlorg.opnsense.dnsmasq_general:
+    enabled: false
+    reload: true
+  when: opnsense_enforce_dnsmasq_disabled | bool
+
+- name: Enable Kea DHCP on DHCP-serving zone gateways
+  oxlorg.opnsense.dhcp_general:
+    enabled: true
+    interfaces: >-
+      {{ netspec.zones | dict2items
+         | selectattr('value.enabled', 'defined') | selectattr('value.enabled')
+         | selectattr('value.dhcp', 'defined') | selectattr('value.dhcp')
+         | map(attribute='key') | list }}
+    fw_rules: false
+    reload: false
+  when: phase.zone_dhcp | bool
+
+- name: Configure per-zone Kea subnets
+  oxlorg.opnsense.dhcp_subnet:
+    subnet: "{{ item.value.subnet }}"
+    description: "{{ opnsense_managed_tag }} {{ item.key }}"
+    pools: ["{{ item.value.dhcp_pool }}"]
+    gateway: ["{{ item.value.gateway }}"]
+    dns: ["{{ item.value.gateway }}"]
+    match_fields: ["subnet"]
+    state: present
+    reload: false
+  loop: "{{ netspec.zones | dict2items }}"
+  loop_control:
+    label: "{{ item.key }} {{ item.value.subnet | default('-') }}"
+  when:
+    - phase.zone_dhcp | bool
+    - item.value.enabled | default(true) | bool
+    - item.value.dhcp | default(false) | bool
+    - item.value.subnet is defined
+
+- name: Apply Kea DHCP changes
+  oxlorg.opnsense.reload:
+    target: "kea"
+  when:
+    - phase.zone_dhcp | bool
+    - not ansible_check_mode

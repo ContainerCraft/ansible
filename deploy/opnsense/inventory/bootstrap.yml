@@ -1,0 +1,22 @@
+---
+# Bootstrap inventory — for bootstrap.yml only.
+#
+# Distinct from inventory/hosts.yml: that one sets ansible_connection=local
+# because site.yml drives the REST API from the controller. Bootstrap is the
+# inverse — it SSHes to the box as a wheel user and escalates to root to mint the
+# API key. An inventory ansible_connection var outranks a play connection:
+# keyword, so the SSH connection must be set HERE, not in the playbook.
+#
+# ansible_host / ansible_user are supplied at runtime (-e ansible_host=10.0.0.1
+# -e ansible_user=barbie) or filled in below per deployment.
+all:
+  children:
+    opnsense_nodes:
+      hosts:
+        opnsense-1:
+          ansible_host: "{{ lookup('env', 'OPNSENSE_FIREWALL') | default('10.0.0.1', true) }}"
+      vars:
+        ansible_connection: ssh
+        # ansible_user supplied at runtime: -e ansible_user=barbie
+        # Box presents a self-signed host key on first contact.
+        ansible_ssh_common_args: "-o StrictHostKeyChecking=accept-new"

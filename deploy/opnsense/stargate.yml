@@ -1,0 +1,21 @@
+#!/usr/bin/env -S ansible-playbook --inventory=inventory/hosts.yml
+---
+# stargate.yml — executable deploy entrypoint for the 'stargate' OPNsense box.
+#
+# This is the ONLY place this deployment's box identity lives. It selects this
+# box's values file and runs the generic site.yml. The collection roles and
+# site.yml stay general-purpose; nothing named 'stargate' leaks into them.
+#
+# Run it directly (shebang resolves ansible-playbook + inventory from PATH/flag):
+#   ./stargate.yml                          # full run (coexist defaults)
+#   ./stargate.yml --check --diff           # dry run
+#   ./stargate.yml --tags connect           # one role at a time
+#   ./stargate.yml -e opnsense_apply_identity=true --tags system --check --diff
+#
+# import_playbook propagates the vars: block below to site.yml's plays (it does
+# not propagate vars_files), so values_file is overridden to this box's file and
+# site.yml's include_vars loads vars/stargate_values.yml instead of the example.
+- name: "ContainerCraft | stargate | OPNsense edge"
+  import_playbook: site.yml
+  vars:
+    values_file: "{{ playbook_dir }}/vars/stargate_values.yml"

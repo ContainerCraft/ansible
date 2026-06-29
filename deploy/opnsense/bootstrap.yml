@@ -1,0 +1,42 @@
+---
+# ContainerCraft | opnsense | bootstrap.yml
+# Mint an OPNsense API key over SSH (as root) and write it to the gitignored
+# .env, so the API-driven site.yml has a credential to authenticate with.
+#
+# This solves the bootstrap chicken-and-egg: site.yml drives the REST API and
+# needs a key; minting a key persists config.xml, which is root-gated and so
+# cannot run through the API. This playbook connects over SSH with become (root)
+# instead of connection: local + REST.
+#
+# Usage:
+#   ansible-playbook bootstrap.yml \
+#     -i inventory/bootstrap.yml \
+#     -e ansible_user=barbie \
+#     -e opn_bootstrap_apikey_user=barbie \
+#     --ask-pass --ask-become-pass
+#
+#   ansible_user            — the SSH/sudo (wheel) login on the box.
+#   opn_bootstrap_apikey_user — the OPNsense user to mint the API key for.
+#   Both default to 'ansible' (role default) when omitted; pass -e to override.
+#   Add -e opn_bootstrap_apikey_force=true to rotate when a key already exists.
+#
+# Then re-source the environment (direnv reload) and run site.yml.
+#
+# Uses inventory/bootstrap.yml (ansible_connection: ssh), NOT inventory/hosts.yml
+# (ansible_connection: local). An inventory connection var outranks a play
+# connection: keyword, so the SSH connection is set in that inventory, not here.
+#
+# Prerequisites:
+#   - SSH access to the box as a wheel user that can sudo (e.g. barbie).
+#   - The target API-key user (opn_bootstrap_apikey_user, default 'ansible') must
+#     already exist on the box. Create it first if needed.
+#
+# No vars_prompt: a vars_prompt fires unconditionally and is NOT suppressed by
+# -e, so it forces an interactive prompt even in a fully-specified run. The user
+# comes from the role default or -e instead.
+- name: "ContainerCraft | opnsense | bootstrap API key"
+  hosts: opnsense_nodes
+  gather_facts: false
+
+  roles:
+    - role: containercraft.opnsense.opn_bootstrap_apikey
