@@ -1,31 +1,69 @@
 ---
-# shared/netspec/firewall_matrix.yml — zone-to-zone policy as data.
-# opn_firewall renders each row into an oxlorg.opnsense.rule entry. from/to are
-# zone keys; the role resolves them to interface names and network aliases.
-# Rules are matched on description (match_fields: [description]); descriptions
-# are prefixed and unique per row.
+# Zone-to-zone policy as data. Each row becomes one oxlorg.opnsense.rule entry.
+# Rules are matched on description (match_fields: [description]).
+# Each rule carries an explicit seq value for deterministic pf ordering.
+# Sequence groups: deny_all 1+, dhcp_allow 10+, isolation 100+, allows 200+,
+# wan_egress 400+.
+#
+# Interface resolution: the firewall task resolves zone names (from/to) to
+# OPNsense interface identifiers at runtime via API lookup. Zone names here
+# are netspec zone keys, not OPNsense interface names.
+#
+# log: false on high-volume rules (wan egress, dhcp) to prevent log saturation.
+# log: true (default) on security-relevant rules (isolation, dns allows, deny-all).
 
 firewall_matrix:
-  # Per-zone egress to the internet (NAT handled by opn_firewall nat_source).
-  wan_egress:
-    - {from: mgmt, to: wan, action: pass, proto: any, desc: "mgmt to internet"}
-    - {from: iot, to: wan, action: pass, proto: any, desc: "iot to internet"}
-    - {from: dmz, to: wan, action: pass, proto: any, desc: "dmz to internet"}
-    - {from: cluster, to: wan, action: pass, proto: any, desc: "cluster to internet"}
+  # Deny-all on zones that must carry no client traffic. Transit is a routed
+  # core with no clients. Sync is HA-only pfsync/hasync. Both are assigned to
+  # OPNsense interfaces so pf can enforce policy — an unassigned VLAN is a
+  # blind spot that bypasses all firewall processing.
+  deny_all:
+    - {seq: 1, from: transit, to: any, action: block, proto: any, src: any, desc: "transit deny all"}
+    - {seq: 2, from: transit, to: any, action: block, proto: any, src: any, ip_proto: inet6, desc: "transit deny all v6"}
+    - {seq: 3, from: sync, to: any, action: block, proto: any, src: any, desc: "sync deny all"}
+    - {seq: 4, from: sync, to: any, action: block, proto: any, src: any, ip_proto: inet6, desc: "sync deny all v6"}
 
-  # Inter-zone isolation. IoT has no lateral access.
+  # DHCP server allow. Required because fw_rules: false on Kea means no
+  # automatic DHCP permit rules. src: any because DHCP DISCOVER has source
+  # 0.0.0.0. to: any because DHCP is local broadcast (255.255.255.255).
+  dhcp_allow:
+    - {seq: 10, from: mgmt, to: any, action: pass, proto: udp, src: any, port: 67, log: false, desc: "dhcp server mgmt"}
+    - {seq: 11, from: iot, to: any, action: pass, proto: udp, src: any, port: 67, log: false, desc: "dhcp server iot"}
+    - {seq: 12, from: dmz, to: any, action: pass, proto: udp, src: any, port: 67, log: false, desc: "dhcp server dmz"}
+    - {seq: 13, from: clients, to: any, action: pass, proto: udp, src: any, port: 67, log: false, desc: "dhcp server clients"}
+
+  # Inter-zone isolation. Block rules before pass rules on the same interface.
+  # IPv4 and IPv6 variants — without inet6 rules, IPv6 traffic bypasses isolation.
   isolation:
-    - {from: iot, to: mgmt, action: block, proto: any, desc: "iot deny mgmt"}
-    - {from: iot, to: cluster, action: block, proto: any, desc: "iot deny cluster"}
-    - {from: dmz, to: mgmt, action: block, proto: any, desc: "dmz deny mgmt"}
-    - {from: dmz, to: cluster, action: block, proto: any, desc: "dmz deny cluster"}
+    - {seq: 100, from: iot, to: mgmt, action: block, proto: any, desc: "iot deny mgmt"}
+    - {seq: 101, from: iot, to: cluster, action: block, proto: any, desc: "iot deny cluster"}
+    - {seq: 102, from: dmz, to: mgmt, action: block, proto: any, desc: "dmz deny mgmt"}
+    - {seq: 103, from: dmz, to: cluster, action: block, proto: any, desc: "dmz deny cluster"}
+    - {seq: 110, from: iot, to: mgmt, action: block, proto: any, ip_proto: inet6, desc: "iot deny mgmt v6"}
+    - {seq: 111, from: iot, to: cluster, action: block, proto: any, ip_proto: inet6, desc: "iot deny cluster v6"}
+    - {seq: 112, from: dmz, to: mgmt, action: block, proto: any, ip_proto: inet6, desc: "dmz deny mgmt v6"}
+    - {seq: 113, from: dmz, to: cluster, action: block, proto: any, ip_proto: inet6, desc: "dmz deny cluster v6"}
+    - {seq: 120, from: clients, to: mgmt, action: block, proto: any, desc: "clients deny mgmt"}
+    - {seq: 121, from: clients, to: cluster, action: block, proto: any, desc: "clients deny cluster"}
+    - {seq: 130, from: clients, to: mgmt, action: block, proto: any, ip_proto: inet6, desc: "clients deny mgmt v6"}
+    - {seq: 131, from: clients, to: cluster, action: block, proto: any, ip_proto: inet6, desc: "clients deny cluster v6"}
 
-  # Explicit allows overriding isolation. mgmt reaches all zones; every zone
-  # reaches the cluster DNS resolver.
+  # Explicit allows. mgmt reaches all zones; every zone reaches cluster DNS.
   allows:
-    - {from: mgmt, to: cluster, action: pass, proto: any, desc: "mgmt to cluster"}
-    - {from: mgmt, to: dmz, action: pass, proto: any, desc: "mgmt to dmz"}
-    - {from: mgmt, to: iot, action: pass, proto: any, desc: "mgmt to iot"}
-    - {from: mgmt, to: cluster_dns, action: pass, proto: "TCP/UDP", port: 53, desc: "mgmt to dns"}
-    - {from: iot, to: cluster_dns, action: pass, proto: "TCP/UDP", port: 53, desc: "iot to dns"}
-    - {from: dmz, to: cluster_dns, action: pass, proto: "TCP/UDP", port: 53, desc: "dmz to dns"}
+    - {seq: 200, from: mgmt, to: cluster, action: pass, proto: any, desc: "mgmt to cluster"}
+    - {seq: 201, from: mgmt, to: dmz, action: pass, proto: any, desc: "mgmt to dmz"}
+    - {seq: 202, from: mgmt, to: iot, action: pass, proto: any, desc: "mgmt to iot"}
+    - {seq: 203, from: mgmt, to: cluster_dns, action: pass, proto: "TCP/UDP", port: 53, desc: "mgmt to dns"}
+    - {seq: 204, from: iot, to: cluster_dns, action: pass, proto: "TCP/UDP", port: 53, desc: "iot to dns"}
+    - {seq: 205, from: dmz, to: cluster_dns, action: pass, proto: "TCP/UDP", port: 53, desc: "dmz to dns"}
+    - {seq: 206, from: clients, to: cluster_dns, action: pass, proto: "TCP/UDP", port: 53, desc: "clients to dns"}
+
+  # Per-zone egress to the internet. Masqueraded via OPNsense automatic
+  # outbound NAT (single-box) or manual NAT via CARP VIP (HA).
+  # log: false — high volume, would saturate log buffer on bare metal.
+  wan_egress:
+    - {seq: 400, from: mgmt, to: wan, action: pass, proto: any, log: false, desc: "mgmt to internet"}
+    - {seq: 401, from: iot, to: wan, action: pass, proto: any, log: false, desc: "iot to internet"}
+    - {seq: 402, from: dmz, to: wan, action: pass, proto: any, log: false, desc: "dmz to internet"}
+    - {seq: 403, from: cluster, to: wan, action: pass, proto: any, log: false, desc: "cluster to internet"}
+    - {seq: 404, from: clients, to: wan, action: pass, proto: any, log: false, desc: "clients to internet"}

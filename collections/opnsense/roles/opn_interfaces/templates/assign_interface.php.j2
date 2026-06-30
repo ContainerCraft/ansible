@@ -1,0 +1,92 @@
+<?php
+/*
+ * assign_interface.php — assign a VLAN device to an interface slot and
+ * configure its IP address. Idempotent: if the device is already assigned,
+ * update the IP if it differs; if not assigned, find the next available
+ * opt slot and create the entry.
+ *
+ * Arguments (from Jinja2 template):
+ *   $device  — VLAN device name (e.g. vlan0.10.2)
+ *   $descr   — interface description (e.g. MGMT)
+ *   $ipaddr  — IPv4 address (e.g. 10.10.0.1)
+ *   $subnet  — subnet mask bits (e.g. 24)
+ *   $enable  — 1 or 0
+ */
+require_once("config.inc");
+require_once("interfaces.inc");
+
+use OPNsense\Core\Config;
+
+$device = "{{ item.device }}";
+$descr = "{{ item.descr | regex_replace('[^a-zA-Z0-9._-]', '') }}";
+$ipaddr = "{{ item.ipaddr }}";
+$subnet = "{{ item.subnet }}";
+$enable = "{{ item.enable | default('1') }}";
+
+Config::getInstance()->lock();
+$config = Config::getInstance()->object();
+
+/* Check if device is already assigned to an interface */
+$existing_ident = null;
+foreach ($config->interfaces->children() as $key => $node) {
+    if ((string)$node->if === $device) {
+        $existing_ident = $key;
+        break;
+    }
+}
+
+if ($existing_ident !== null) {
+    /* Device already assigned — check if IP needs updating */
+    $node = $config->interfaces->$existing_ident;
+    $current_ip = (string)$node->ipaddr;
+    $current_subnet = (string)$node->subnet;
+    $current_descr = (string)$node->descr;
+    $current_enable = (string)$node->enable;
+
+    if ($current_ip === $ipaddr && $current_subnet === $subnet
+        && $current_descr === $descr && $current_enable === $enable) {
+        Config::getInstance()->unlock();
+        echo "OPN_IFACE_STATUS=unchanged\n";
+        echo "OPN_IFACE_IDENT=$existing_ident\n";
+        exit(0);
+    }
+
+    /* Update existing entry */
+    $node->ipaddr = $ipaddr;
+    $node->subnet = $subnet;
+    $node->descr = $descr;
+    $node->enable = $enable;
+    if (empty((string)$node->spoofmac)) {
+        $node->addChild('spoofmac', '');
+    }
+
+    Config::getInstance()->save();
+    Config::getInstance()->unlock();
+
+    echo "OPN_IFACE_STATUS=updated\n";
+    echo "OPN_IFACE_IDENT=$existing_ident\n";
+    exit(0);
+}
+
+/* Device not assigned — find next available opt slot */
+$next = 1;
+while (isset($config->interfaces->{"opt$next"})) {
+    $next++;
+}
+$ident = "opt$next";
+
+/* Create the interface entry */
+$node = $config->interfaces->addChild($ident);
+$node->addChild('if', $device);
+$node->addChild('descr', $descr);
+$node->addChild('enable', $enable);
+$node->addChild('ipaddr', $ipaddr);
+$node->addChild('subnet', $subnet);
+$node->addChild('spoofmac', '');
+
+Config::getInstance()->save();
+Config::getInstance()->unlock();
+
+echo "OPN_IFACE_STATUS=created\n";
+echo "OPN_IFACE_IDENT=$ident\n";
+exit(0);

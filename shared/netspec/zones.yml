@@ -16,16 +16,16 @@ netspec:
   static_hosts: []
 
   # Trunks. Each trunk is a physical OPNsense port carrying tagged zone VLANs to
-  # one switch / power domain. Built on currently-unused ports (em2, em3); the
-  # live flat LAN stays on em0/em1 until the switch cables are moved to these
+  # one switch / power domain. Built on currently-unused ports (em1, em3); the
+  # live flat LAN stays on em0 until the switch cables are moved to these
   # trunk ports at cutover. A zone declares which trunks it rides; opn_interfaces
   # creates the zone VLAN sub-interface on each listed trunk parent.
   trunks:
     qnap: # cluster + infrastructure power domain (QNAP switch)
-      parent: "em2"
+      parent: "em1"
       domain: cluster
     poe: # AP / WiFi power domain (POE switch); separate UPS domain
-      parent: "em3"
+      parent: "em2"
       domain: ap
 
   # Zone dictionary. Add a zone by adding a block in values.yml; set enabled:false
@@ -36,7 +36,7 @@ netspec:
       enabled: true
       vlan: 1
       tagged: true # carried as a tagged VLAN, not the native VLAN
-      trunks: [qnap] # routed core to downstream gateways
+      trunks: [qnap, poe] # routed core; poe trunk carries VLAN 1 for AP management via bridge0
       role: transit
       dhcp: false # routed transit, no client addressing
       client_ips: false
@@ -77,6 +77,18 @@ netspec:
       dhcp: true
       dhcp_pool: "10.30.0.100 - 10.30.0.200"
       description: "DMZ - externally reachable services"
+
+    clients:
+      enabled: true
+      vlan: 100
+      tagged: true
+      trunks: [qnap, poe]
+      role: zone
+      subnet: "10.100.0.0/24"
+      gateway: "10.100.0.1"
+      dhcp: true
+      dhcp_pool: "10.100.0.100 - 10.100.0.200"
+      description: "CLIENTS - general purpose wired and WiFi devices"
 
     cluster:
       enabled: true

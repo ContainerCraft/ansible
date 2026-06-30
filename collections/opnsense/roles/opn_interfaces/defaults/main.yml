@@ -21,9 +21,12 @@ opnsense_prepare_trunk_ports: "{{ lookup('env', 'OPNSENSE_PREPARE_TRUNK_PORTS') 
 opnsense_bridge_description: ""
 opnsense_bridge_keep_members: []
 
-# --- Interface assignment ---
+# --- Interface assignment and IP configuration (via SSH + config.xml) ---
+# OPNsense 26.1 has no MVC API for interface assignment or per-interface IP.
+# These are set via a PHP script rendered over SSH.
 opnsense_assign_interfaces: "{{ lookup('env', 'OPNSENSE_ASSIGN_INTERFACES') | default(false, true) | bool }}"
 opnsense_interface_assignments: []
+opnsense_interfaces_ssh_user: "{{ lookup('env', 'OPNSENSE_SSH_USER') | default('root', true) }}"
 
 # --- Interface data fallback ---
 netspec:

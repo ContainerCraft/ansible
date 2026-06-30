@@ -1,11 +1,10 @@
 ---
 # Kea DHCPv4, per-zone scopes. Runs only when the phase serves zone DHCP.
-# Not on the transit zone, not on the cluster segment.
 #
-# dhcp_subnet is matched on subnet. dhcp_general is a single settings object;
-# fw_rules false so Kea does not inject implicit firewall rules that would
-# compete with opn_firewall. A fresh 26.1 install enables Dnsmasq DHCP by
-# default, which conflicts with Kea on the same interfaces.
+# socket_type: udp so pf firewall rules gate DHCP traffic (raw bypasses pf).
+# fw_rules: false — DHCP allow rules are in the firewall matrix (opn_firewall).
+# auto_options: false — explicit routers/dns prevents HA VIP mismatch and
+# interface IP ordering race condition.
 
 - name: Disable Dnsmasq DHCP (conflicts with Kea)
   oxlorg.opnsense.dnsmasq_general:
@@ -13,16 +12,82 @@
     reload: true
   when: opnsense_enforce_dnsmasq_disabled | bool
 
+# Resolve zone names to OPNsense interface identifiers for Kea.
+# Kea's interfaces field expects OPNsense identifiers (opt1, opt2...).
+# Match by interface description (set by opn_interfaces assignment script
+# to the zone descr field uppercased, e.g. "MGMT", "IOT", "DMZ").
+- name: Query OPNsense interface assignments for DHCP
+  ansible.builtin.uri:
+    url: "https://{{ opnsense_api_args.firewall }}:{{ opnsense_api_args.api_port }}/api/interfaces/overview/interfacesInfo/true"
+    method: GET
+    url_username: "{{ opnsense_api_args.api_key }}"
+    url_password: "{{ opnsense_api_args.api_secret }}"
+    force_basic_auth: true
+    validate_certs: "{{ opnsense_api_args.ssl_verify }}"
+    return_content: true
+    status_code: [200]
+  register: opn_dhcp_interfaces
+  when: phase.zone_dhcp | bool
+
+- name: Build description-to-identifier map for DHCP
+  ansible.builtin.set_fact:
+    opn_dhcp_descr_to_id: >-
+      {{ dict(opn_dhcp_interfaces.json.rows
+              | selectattr('identifier', 'defined')
+              | selectattr('identifier', 'ne', '')
+              | map(attribute='description') | list
+              | zip(opn_dhcp_interfaces.json.rows
+              | selectattr('identifier', 'defined')
+              | selectattr('identifier', 'ne', '')
+              | map(attribute='identifier') | list)) }}
+  when: phase.zone_dhcp | bool
+
+- name: Initialize DHCP zone interface map
+  ansible.builtin.set_fact:
+    opn_dhcp_zone_interfaces: {}
+  when: phase.zone_dhcp | bool
+
+- name: Resolve DHCP zone interfaces
+  ansible.builtin.set_fact:
+    opn_dhcp_zone_interfaces: "{{ opn_dhcp_zone_interfaces | combine({item.key: _resolved}) }}"
+  vars:
+    _resolved: >-
+      {{ 'lan' if item.value.role | default('') == 'cluster'
+         else (opn_dhcp_descr_to_id[item.key | upper] | default('UNRESOLVED_' ~ item.key)) }}
+  loop: "{{ netspec.zones | dict2items | selectattr('value.dhcp', 'defined') | selectattr('value.dhcp') | list }}"
+  loop_control:
+    label: "{{ item.key }} → {{ _resolved }}"
+  when: phase.zone_dhcp | bool
+
+- name: Enable Kea Control Agent
+  oxlorg.opnsense.dhcp_controlagent:
+    enabled: true
+    reload: false
+  when: phase.zone_dhcp | bool
+
 - name: Enable Kea DHCP on DHCP-serving zone gateways
   oxlorg.opnsense.dhcp_general:
     enabled: true
-    interfaces: >-
-      {{ netspec.zones | dict2items
-         | selectattr('value.enabled', 'defined') | selectattr('value.enabled')
-         | selectattr('value.dhcp', 'defined') | selectattr('value.dhcp')
-         | map(attribute='key') | list }}
+    interfaces: "{{ opn_dhcp_zone_interfaces.values() | list }}"
     fw_rules: false
+    socket_type: "{{ opnsense_dhcp_socket_type }}"
     reload: false
+  when: phase.zone_dhcp | bool
+
+- name: Apply Kea general hardening (socket retries)
+  oxlorg.opnsense.raw:
+    module: kea
+    controller: dhcpv4
+    command: set
+    action: post
+    data:
+      dhcpv4:
+        general: "{{ opnsense_dhcp_general_hardening }}"
+    firewall: "{{ opnsense_api_args.firewall }}"
+    api_key: "{{ opnsense_api_args.api_key }}"
+    api_secret: "{{ opnsense_api_args.api_secret }}"
+    api_port: "{{ opnsense_api_args.api_port }}"
+    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
   when: phase.zone_dhcp | bool
 
 - name: Configure per-zone Kea subnets
@@ -30,8 +95,10 @@
     subnet: "{{ item.value.subnet }}"
     description: "{{ opnsense_managed_tag }} {{ item.key }}"
     pools: ["{{ item.value.dhcp_pool }}"]
+    auto_options: false
     gateway: ["{{ item.value.gateway }}"]
     dns: ["{{ item.value.gateway }}"]
+    domain: "{{ netspec.cluster_domain | default('home.arpa') }}"
     match_fields: ["subnet"]
     state: present
     reload: false
@@ -43,6 +110,54 @@
     - item.value.enabled | default(true) | bool
     - item.value.dhcp | default(false) | bool
     - item.value.subnet is defined
+
+# Per-subnet hardening: allocator, match-client-id, valid_lifetime.
+# These fields ARE in the OPNsense Kea model (KeaDhcpv4.xml subnet4 array)
+# but NOT in FIELDS_CHANGE of the oxlorg dhcp_subnet module, so they must
+# be set via raw API on the existing subnet UUID after the module creates it.
+- name: Search for created subnet UUIDs
+  oxlorg.opnsense.raw:
+    module: kea
+    controller: dhcpv4
+    command: search_subnet
+    action: get
+    firewall: "{{ opnsense_api_args.firewall }}"
+    api_key: "{{ opnsense_api_args.api_key }}"
+    api_secret: "{{ opnsense_api_args.api_secret }}"
+    api_port: "{{ opnsense_api_args.api_port }}"
+    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
+  register: opn_dhcp_subnets
+  when:
+    - phase.zone_dhcp | bool
+    - not ansible_check_mode
+
+- name: Apply per-subnet hardening (allocator, match-client-id, valid_lifetime)
+  oxlorg.opnsense.raw:
+    module: kea
+    controller: dhcpv4
+    command: "set_subnet/{{ _subnet_uuid }}"
+    action: post
+    data:
+      subnet4: "{{ opnsense_dhcp_subnet_overrides[item.key] }}"
+    firewall: "{{ opnsense_api_args.firewall }}"
+    api_key: "{{ opnsense_api_args.api_key }}"
+    api_secret: "{{ opnsense_api_args.api_secret }}"
+    api_port: "{{ opnsense_api_args.api_port }}"
+    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
+  vars:
+    _matching: "{{ opn_dhcp_subnets.response.rows | default([]) | selectattr('subnet', 'equalto', item.value.subnet) | list }}"
+    _subnet_uuid: "{{ (_matching | first).uuid if _matching | length > 0 else 'MISSING' }}"
+  loop: "{{ netspec.zones | dict2items }}"
+  loop_control:
+    label: "{{ item.key }} {{ item.value.subnet | default('-') }}"
+  when:
+    - phase.zone_dhcp | bool
+    - not ansible_check_mode
+    - item.value.enabled | default(true) | bool
+    - item.value.dhcp | default(false) | bool
+    - item.value.subnet is defined
+    - item.key in opnsense_dhcp_subnet_overrides
+    - _subnet_uuid != 'MISSING'
 
 - name: Apply Kea DHCP changes
   oxlorg.opnsense.reload:

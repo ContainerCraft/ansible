@@ -12,11 +12,11 @@ opnsense_api_args:
   api_port: "{{ opnsense_api_port }}"
   ssl_verify: "{{ opnsense_ssl_verify }}"
 
-# --- Apply discipline / object marker ---
+# --- Apply discipline ---
 opnsense_reload: false
 opnsense_managed_tag: "{{ lookup('env', 'OPNSENSE_MANAGED_TAG') | default('ansible-managed', true) }}"
 
-# --- CARP node identity (0 = master, higher = backup; from host_vars) ---
+# --- CARP node identity ---
 opnsense_carp_advskew: 0
 
 # --- CARP / hasync ---
@@ -24,6 +24,7 @@ opnsense_carp_password: "{{ lookup('env', 'OPNSENSE_CARP_PASSWORD') | default(''
 opnsense_carp_vhid_base: "{{ lookup('env', 'OPNSENSE_CARP_VHID_BASE') | default(1, true) | int }}"
 opnsense_hasync_username: "{{ lookup('env', 'OPNSENSE_HASYNC_USERNAME') | default('root', true) }}"
 opnsense_hasync_password: "{{ lookup('env', 'OPNSENSE_HASYNC_PASSWORD') | default('', true) }}"
+opnsense_hasync_pfsyncversion: "1400"
 opnsense_hasync_syncitems:
   - aliases
   - rules

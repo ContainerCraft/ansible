@@ -2,20 +2,12 @@
 # VLAN interfaces on the trunk ports. L2/L3 interface creation only; no DHCP,
 # no rules, no VIPs.
 #
-# Each zone declares which trunks (power domains) it rides. A zone VLAN is
-# created on every listed trunk's parent interface, so a zone reaching both
-# power domains gets a sub-interface on each trunk. interface_vlan idempotency
-# key is (interface, tag); description is mutable. reload is deferred to a
-# single call at the end.
-#
-# Trunks are built on currently-unused ports (em2/em3); the live flat LAN on
-# em0/em1 is untouched until the switch cables are moved to these ports.
-#
-# If the trunk parents are still members of an existing bridge (a box migrating
-# from a flat bridged LAN), opnsense_prepare_trunk_ports must be set to
-# reconfigure that bridge to exclude them. This is a live-network mutation and is
-# therefore opt-in and off by default; a normal run never modifies an existing
-# bridge. interface_bridge matches on description and reconfigures the members.
+# The oxlorg interface_vlan module matches existing entries by description
+# (FIELD_ID). Device names (vlanif) must be unique across all VLANs on the
+# system. The module auto-generates vlan0.<tag> which collides when the same
+# tag appears on multiple parent interfaces. This role pre-reads existing
+# VLANs to reuse existing device names for adopted entries and generates
+# unique names (vlan0.<tag>.<parent_index>) for new entries.
 
 - name: Prepare trunk ports — exclude them from the existing bridge
   oxlorg.opnsense.interface_bridge:
@@ -26,6 +18,26 @@
   when:
     - opnsense_prepare_trunk_ports | bool
     - opnsense_bridge_description | length > 0
+
+# Pre-read existing VLANs to build (interface, tag) → device name lookup.
+# This prevents device name collisions on update and preserves existing
+# device names for assigned VLANs that cannot be renamed.
+- name: Read existing VLAN devices
+  oxlorg.opnsense.list:
+    target: "interface_vlan"
+  register: opn_interfaces_existing_vlans
+
+- name: Build existing VLAN device name lookup
+  ansible.builtin.set_fact:
+    opn_interfaces_device_lookup: >-
+      {{ dict(
+        opn_interfaces_existing_vlans.data | default([])
+        | map(attribute='interface') | list
+        | zip(opn_interfaces_existing_vlans.data | default([]) | map(attribute='vlan') | list)
+        | map('join', ':')
+        | list
+        | zip(opn_interfaces_existing_vlans.data | default([]) | map(attribute='device') | list)
+      ) }}
 
 - name: Initialize VLAN assignment list
   ansible.builtin.set_fact:
@@ -45,12 +57,15 @@
   when:
     - item.0.value.enabled | default(true) | bool
     - item.0.value.tagged | default(false) | bool
-    - item.0.value.vlan | int > 1
+    - item.0.value.vlan | int > 0
 
 - name: Create native blackhole VLAN on each trunk parent
   oxlorg.opnsense.interface_vlan:
     interface: "{{ item.value.parent }}"
     vlan: "{{ netspec.native_blackhole_vlan }}"
+    device: >-
+      {{ opn_interfaces_device_lookup[item.value.parent ~ ':' ~ netspec.native_blackhole_vlan]
+         | default('vlan0.' ~ netspec.native_blackhole_vlan ~ '.' ~ item.value.parent | regex_replace('[^0-9]', '')) }}
     description: "{{ opnsense_managed_tag }} native blackhole {{ item.key }}"
     reload: false
     state: present
@@ -62,6 +77,9 @@
   oxlorg.opnsense.interface_vlan:
     interface: "{{ item.parent }}"
     vlan: "{{ item.vlan }}"
+    device: >-
+      {{ opn_interfaces_device_lookup[item.parent ~ ':' ~ item.vlan]
+         | default('vlan0.' ~ item.vlan ~ '.' ~ item.parent | regex_replace('[^0-9]', '')) }}
     description: "{{ opnsense_managed_tag }} {{ item.zone }} {{ item.trunk }}"
     reload: false
     state: present
@@ -74,54 +92,81 @@
     target: "interface_vlan"
   when: not ansible_check_mode
 
-# Interface assignment maps each VLAN device to an interface slot (optN). Source-
-# verified boundary (opnsense/core NetworkInterface.xml, 26.1): the assignment
-# model exposes ONLY `if` (DeviceField, unique) and `descr` (DescriptionField).
-# It does NOT carry ipaddr/subnet/enable/blockpriv. There is no MVC API to set a
-# per-interface IP in 26.1; assignment alone does not make a zone routable.
-#
-# Therefore this automation's interface boundary is: create VLAN devices (above)
-# and, optionally, assign them to optN slots (below). The per-interface IP — the
-# zone gateway, e.g. 10.10.0.1/24 — is configured outside this automation (GUI,
-# or initialsetup for WAN). Assignment is opt-in and off by default.
-#
-# Assignment is a Layer-2 RESOURCE: the model's UniqueConstraint is on `if` (the
-# device), so idempotency keys on `if`, NOT descr (descr is not unique — two
-# zones could share one and collide). Driven with ansible.builtin.uri doing
-# GET-diff -> POST. force_basic_auth is required for OPNsense API-key auth.
-# uri POST is skipped in check mode; the GET reads current state and an entry is
-# added only when its device is absent.
-- name: Read existing interface assignments
-  ansible.builtin.uri:
-    url: "https://{{ opnsense_api_args.firewall }}:{{ opnsense_api_args.api_port }}/api/interfaces/assignment/searchItem"
-    method: GET
-    url_username: "{{ opnsense_api_args.api_key }}"
-    url_password: "{{ opnsense_api_args.api_secret }}"
-    force_basic_auth: true
-    validate_certs: "{{ opnsense_api_args.ssl_verify }}"
-    return_content: true
-    status_code: [200]
-  register: opn_interfaces_assignments
+# Interface assignment + IP configuration via SSH + config.xml.
+# OPNsense 26.1 has no MVC API for interface assignment.
+# assign_interface.php.j2 rendered via lookup('template'), delivered via raw.
+- name: Write and execute interface assignment script
+  ansible.builtin.raw: |
+    cat > /tmp/konductor_assign_iface.php << 'EOPHP'
+    {{ lookup('template', 'assign_interface.php.j2') }}
+    EOPHP
+    php /tmp/konductor_assign_iface.php
+    RC=$?
+    rm -f /tmp/konductor_assign_iface.php
+    exit $RC
+  delegate_to: "{{ opnsense_api_args.firewall }}"
+  vars:
+    ansible_connection: ssh
+    ansible_user: "{{ hostvars[inventory_hostname].opnsense_interfaces_ssh_user }}"
+    ansible_ssh_common_args: "-o StrictHostKeyChecking=accept-new"
+    ansible_become: true
+  register: opn_iface_assign_result
+  changed_when: "'OPN_IFACE_STATUS=created' in opn_iface_assign_result.stdout or 'OPN_IFACE_STATUS=updated' in opn_iface_assign_result.stdout"
+  failed_when: opn_iface_assign_result.rc != 0
+  loop: "{{ opnsense_interface_assignments }}"
+  loop_control:
+    label: "{{ item.descr }} {{ item.device }} {{ item.ipaddr }}/{{ item.subnet }}"
   when: opnsense_assign_interfaces | bool
 
-- name: Assign zone VLAN devices to interface slots
-  ansible.builtin.uri:
-    url: "https://{{ opnsense_api_args.firewall }}:{{ opnsense_api_args.api_port }}/api/interfaces/assignment/addItem"
-    method: POST
-    url_username: "{{ opnsense_api_args.api_key }}"
-    url_password: "{{ opnsense_api_args.api_secret }}"
-    force_basic_auth: true
-    validate_certs: "{{ opnsense_api_args.ssl_verify }}"
-    body_format: json
-    body:
-      interface:
-        if: "{{ item.device }}"
-        descr: "{{ item.zone }}"
-    status_code: [200]
-  loop: "{{ opnsense_interface_assignments | default([]) }}"
+- name: Reconfigure assigned interfaces
+  ansible.builtin.raw: >
+    configctl interface reconfigure {{ (item.stdout_lines | select('match', 'OPN_IFACE_IDENT=') | first).split('=')[1] }}
+  delegate_to: "{{ opnsense_api_args.firewall }}"
+  vars:
+    ansible_connection: ssh
+    ansible_user: "{{ hostvars[inventory_hostname].opnsense_interfaces_ssh_user }}"
+    ansible_ssh_common_args: "-o StrictHostKeyChecking=accept-new"
+    ansible_become: true
+  loop: "{{ opn_iface_assign_result.results | default([]) }}"
   loop_control:
-    label: "{{ item.zone }} -> {{ item.device }}"
+    label: "{{ item.item.descr | default('?') }}"
   when:
     - opnsense_assign_interfaces | bool
-    - item.device not in (opn_interfaces_assignments.json.rows | default([]) | map(attribute='if') | list)
-  notify: Reconfigure interface assignments
+    - item.changed | default(false)
+
+# Add newly assigned VLAN sub-interfaces to their declared bridge.
+# The bridge field on an interface assignment entry declares which bridge
+# (matched by description) the interface belongs to. The opt identifier
+# comes from the PHP script output (OPN_IFACE_IDENT=optNN).
+- name: Collect bridge member opt identifiers from assignment results
+  ansible.builtin.set_fact:
+    opn_interfaces_bridge_additions: >-
+      {{ opn_interfaces_bridge_additions | default([]) + [{
+           'bridge': item.item.bridge,
+           'opt': (item.stdout_lines | select('match', 'OPN_IFACE_IDENT=') | first).split('=')[1]
+         }] }}
+  loop: "{{ opn_iface_assign_result.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.descr | default('?') }} → {{ item.item.bridge | default('none') }}"
+  when:
+    - opnsense_assign_interfaces | bool
+    - item.item.bridge is defined
+    - item.stdout_lines is defined
+
+- name: Debug — collected bridge additions
+  ansible.builtin.debug:
+    var: opn_interfaces_bridge_additions
+  when: opn_interfaces_bridge_additions is defined
+
+- name: Update bridge members to include assigned VLAN sub-interfaces
+  oxlorg.opnsense.interface_bridge:
+    description: "{{ item.bridge }}"
+    members: "{{ opnsense_bridge_keep_members + [item.opt] }}"
+    state: present
+    reload: true
+  loop: "{{ opn_interfaces_bridge_additions | default([]) }}"
+  loop_control:
+    label: "{{ item.bridge }} += {{ item.opt }}"
+  when:
+    - opnsense_assign_interfaces | bool
+    - opn_interfaces_bridge_additions | default([]) | length > 0

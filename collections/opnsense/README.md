@@ -1,10 +1,11 @@
 # containercraft.opnsense
 
 A general-purpose Ansible collection that configures an [OPNsense](https://opnsense.org/)
-edge router entirely through its REST API. It builds VLAN interfaces, Unbound
-DNS, Kea DHCP, a zone-to-zone firewall policy, and CARP high availability, and it
-sequences those changes through a monotonic migration model so a live network can
-be re-architected without an outage.
+edge router entirely through its REST API. It builds VLAN interfaces, a hardened
+Unbound DNS resolver with DNSBL threat intelligence, Kea DHCP with per-subnet
+security policy, a sequenced zone-to-zone firewall with savepoint rollback, and
+CARP high availability — and it sequences those changes through a monotonic
+migration model so a live network can be re-architected without an outage.
 
 The collection ships reusable roles only. A companion *deploy* layer (an
 inventory, a values file, and an executable entrypoint) turns those roles into a
@@ -60,12 +61,12 @@ Three callout markers flag content by audience:
 
 `containercraft.opnsense` automates an OPNsense firewall the way a person would
 automate a cloud provider: by calling an API. Every change — a VLAN, a firewall
-rule, a DHCP scope — is an HTTP request to the firewall's REST endpoint. There is
-no configuration file pushed to the box and, with one deliberate exception, no SSH
-session. The firewall is treated as a service with an API, and the roles are
-clients of that service.
+rule, a DHCP scope, a DNS hardening parameter — is an HTTP request to the
+firewall's REST endpoint. There is no configuration file pushed to the box and,
+with one deliberate exception, no SSH session. The firewall is treated as a
+service with an API, and the roles are clients of that service.
 
-The collection encodes three things that raw API calls do not:
+The collection encodes four things that raw API calls do not:
 
 - **A data model.** The network's shape — its zones, subnets, trunk ports, and
   inter-zone policy — is declared once as data. Roles render that data into API
@@ -77,6 +78,16 @@ The collection encodes three things that raw API calls do not:
 - **An idempotent, recoverable apply.** Re-running converges to the same state.
   Firewall changes are wrapped in a server-side savepoint that auto-reverts if
   connectivity is lost, so a bad rule cannot lock the operator out.
+- **A hardened security posture.** The DNS resolver hides its identity and
+  version, validates DNSSEC, enforces rebinding protection with private-address
+  filtering, runs DNSBL threat intelligence feeds (Abuse.ch ThreatFox, Hagezi),
+  sets the ACL default to refuse with explicit per-zone allows, and sizes caches
+  for bare-metal performance. The DHCP server uses UDP sockets (pf-gated, not
+  raw), disables option auto-collection to prevent HA race conditions, and applies
+  per-subnet allocator, client-ID, and lifetime policies via the raw API. The
+  firewall uses explicit sequence numbering, quick-match semantics, and includes
+  DHCP server allow rules that are required when Kea's automatic firewall rules
+  are disabled.
 
 ### What it is not
 
@@ -88,6 +99,9 @@ The collection encodes three things that raw API calls do not:
 - It does **not** implement masquerade/outbound NAT. OPNsense's automatic
   outbound NAT already masquerades internal zones to the WAN address; the
   collection relies on that default rather than duplicating it (see §9.6 and §16).
+- It does **not** set per-interface IP addresses on opt* interfaces. The OPNsense
+  MVC API does not expose this; it is a manual step in the web UI between the
+  VLAN creation phase and the DHCP activation phase.
 - It is **not** tied to any one site. The collection is general-purpose; the
   example network used throughout this document belongs to a deploy layer, not to
   the collection.
@@ -177,6 +191,9 @@ whole collection:
   is faster and avoids partial-apply churn.
 - **Most operations are check-mode safe.** Because they are API reads and writes,
   Ansible can predict and diff them without touching the box.
+- **Connection resilience is built in.** The `module_defaults` block sets
+  `api_timeout: 30` and `api_retries: 2`, tolerating up to two transient
+  connection failures and a 30-second overall timeout per request.
 
 ### The one exception: bootstrap
 
@@ -186,6 +203,19 @@ cannot be done through the API. Exactly one role — `opn_bootstrap_apikey` — 
 the API-only rule: it connects over SSH, escalates to root, mints a key, and
 writes it where the API-driven roles can read it. After bootstrap, everything
 returns to the API model. This chicken-and-egg resolution is detailed in §12.
+
+### The raw API extension pattern
+
+Some OPNsense model fields are not exposed by the upstream `oxlorg.opnsense`
+collection's typed modules. The collection reaches these fields through the
+`oxlorg.opnsense.raw` module, which calls any OPNsense API endpoint directly.
+This pattern is used for:
+
+- Unbound hardening parameters at `unbound.advanced.*` (identity hiding, DNSSEC
+  hardening, rebinding protection, cache sizing, DNSBL, ACL default action)
+- Kea general settings at `dhcpv4.general.*` (socket retry configuration)
+- Kea per-subnet settings at `dhcpv4/set_subnet/<uuid>` (allocator, client-ID
+  matching, per-zone lease lifetimes)
 
 > 🔬 **Deeper.** The collection consumes the `oxlorg.opnsense` collection for the
 > actual API module implementations. `containercraft.opnsense` orchestrates;
@@ -293,13 +323,6 @@ server and run its roles with sane defaults, overriding through the environment 
 playbook variables. The example deployment in this repository is one such
 consumer; it is not part of the published collection.
 
-> 🔬 **Deeper.** This split follows two prior-art patterns. The collection mirrors
-> a published, role-only Ansible Galaxy collection: roles with real
-> `defaults/main.yml`, a `galaxy.yml`, `meta/runtime.yml`, and a changelog, and no
-> playbooks. The deploy layer mirrors an orchestration repository: executable,
-> shebang-driven playbooks that consume the collection and carry the site's
-> identity. §14 expands on why the boundary is drawn exactly here.
-
 ---
 
 ## §6 — Command reference
@@ -328,12 +351,12 @@ concern. Tags compose; `--tags dns,dhcp` runs both.
 | Tag | Role | Effect |
 |---|---|---|
 | `connect` | opn_connect | read-only API reachability probe |
-| `system` | opn_system | tunables and (gated) identity/WAN |
+| `system` | opn_system | CARP tunables and (gated) identity/WAN |
 | `interfaces`, `vlans` | opn_interfaces | trunk VLANs, blackhole VLAN, assignment |
-| `dns`, `unbound` | opn_dns | Unbound resolver and forwarding |
-| `dhcp`, `kea` | opn_dhcp | Kea DHCP per zone |
-| `firewall`, `nat` | opn_firewall | aliases and zone rules |
-| `ha` | opn_ha | CARP VIPs and config sync (gated) |
+| `dns`, `unbound` | opn_dns | hardened Unbound, DNSBL, ACLs, split-horizon forward |
+| `dhcp`, `kea` | opn_dhcp | Kea DHCP per zone with per-subnet hardening |
+| `firewall`, `nat` | opn_firewall | sequenced aliases and zone rules with DHCP allow |
+| `ha` | opn_ha | CARP VIPs, hasync (pfsync v1400), config sync trigger (gated) |
 | `decommission` | opn_edge_decommission | legacy-segment withdrawal (gated) |
 
 ### Bootstrap (separate playbook)
@@ -376,8 +399,10 @@ environment, never from a committed file.
 | `opnsense_api_secret` | `OPNSENSE_API_SECRET` | empty | API secret |
 | `opnsense_api_port` | `OPNSENSE_API_PORT` | `443` | API port |
 | `opnsense_ssl_verify` | `OPNSENSE_SSL_VERIFY` | `false` | validate TLS cert |
+| `opnsense_api_timeout` | — | `30` | request timeout (seconds) |
+| `opnsense_api_retries` | — | `2` | retry count on transient errors |
 
-`opnsense_api_args` is a convenience mapping of the five values above, used by
+`opnsense_api_args` is a convenience mapping of the connection values, used by
 tasks that call modules outside the credential-injecting action group (the `raw`
 module and `ansible.builtin.uri`).
 
@@ -389,7 +414,7 @@ module and `ansible.builtin.uri`).
 | `opnsense_managed_tag` | `OPNSENSE_MANAGED_TAG` | `ansible-managed` | description prefix on managed objects; also the idempotency key |
 | `opnsense_reload` | — | `false` | per-object reload discipline |
 
-### System identity and WAN (`opn_system`)
+### System tunables (`opn_system`)
 
 | Variable | Default | Purpose |
 |---|---|---|
@@ -400,12 +425,71 @@ module and `ansible.builtin.uri`).
 | `opnsense_wan_ipv4_type` | `dhcp` | `dhcp` \| `static` \| `pppoe` |
 | `opnsense_wan_block_private` | `true` | block RFC1918 on WAN |
 | `opnsense_wan_block_bogons` | `true` | block bogons on WAN |
-| `opnsense_tunables` | forwarding on | sysctl name→value map |
+| `opnsense_tunables` | CARP hardening | sysctl name→value map |
+
+The default tunables configure CARP HA observability:
+`net.inet.carp.senderr_demotion_factor: 240` (demote master on NIC send errors)
+and `net.inet.carp.log: 2` (log state transitions). IPv4/IPv6 forwarding is
+already enabled by OPNsense default and is not configured explicitly.
 
 > ⚠️ **Blast radius.** `opnsense_apply_identity: true` runs OPNsense's
 > first-boot wizard, which is the only API path to WAN configuration in current
 > releases and re-applies the wizard's settings. Enable it deliberately and
 > confirm the WAN settings match the upstream link first.
+
+### DNS hardening (`opn_dns`)
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `opnsense_dns_hardening` | (dict) | Unbound `advanced.*` settings via raw API |
+| `opnsense_dns_acl_default_action` | `refuse` | ACL default for unknown sources |
+| `opnsense_dns_acls` | per-zone allow | explicit ACL entries |
+| `opnsense_dns_dnsbl_enabled` | `true` | enable DNSBL threat feeds |
+| `opnsense_dns_dnsbl_type` | `[atf, hgz011]` | Abuse.ch ThreatFox + Hagezi TI |
+| `opnsense_dns_cache` | (dict) | cache sizing for bare metal |
+
+The hardening dict sets identity hiding (`hideidentity`, `hideversion`), DNSSEC
+enforcement (`dnssecstripped`, `belownxdomain`), cache poisoning resistance
+(`aggressivensec`, `unwantedreplythreshold: 10000000`), privacy
+(`qnameminstrict: 0`), rebinding protection (`privateaddress` with full RFC 1918
++ special-use ranges, `privatedomain: home.arpa`), DNSSEC bypass for the
+internal zone (`insecuredomain: home.arpa`), and observability
+(`extendedstatistics`, `logservfail`, `valloglevel: 1`).
+
+The cache dict sizes `msgcachesize: 256m`, `rrsetcachesize: 512m`,
+`outgoingrange: 8192`, `numqueriesperthread: 4096`, `infracachenumhosts: 20000`.
+
+### DHCP (`opn_dhcp`)
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `opnsense_enforce_dnsmasq_disabled` | `false` | disable default Dnsmasq DHCP before enabling Kea |
+| `opnsense_dhcp_socket_type` | `udp` | UDP sockets (pf-gated); `raw` bypasses pf |
+| `opnsense_dhcp_general_hardening` | (dict) | Kea general settings via raw API |
+| `opnsense_dhcp_subnet_overrides` | (dict per zone) | per-subnet allocator, client-ID, lifetime |
+
+The general hardening sets `service_sockets_max_retries: 5` and
+`service_sockets_retry_wait_time: 5000` so Kea retries interface binding on
+startup rather than silently failing.
+
+The subnet overrides configure per-zone policies:
+
+| Zone | `allocator` | `match-client-id` | `valid_lifetime` |
+|---|---|---|---|
+| mgmt | `random` | `1` (true) | `7200` (2h) |
+| iot | `random` | `0` (false) | `3600` (1h) |
+| dmz | `random` | `1` (true) | `3600` (1h) |
+
+`allocator: random` prevents predictable address assignment.
+`match-client-id: 0` on the IoT subnet uses MAC-based identification because
+IoT devices frequently generate unstable client IDs. Shorter lifetimes on IoT
+and DMZ reduce the window for stale address assignments after device removal.
+
+All subnets use `auto_options: false` with explicit `gateway`, `dns`, and
+`domain` values. This prevents the ordering race condition where Kea
+auto-collects router/DNS options from an interface that does not yet have an IP
+assigned, and prevents HA failover from auto-collecting the backup node's
+physical IP instead of the CARP VIP.
 
 ### Interfaces (`opn_interfaces`)
 
@@ -420,12 +504,6 @@ module and `ansible.builtin.uri`).
 > ⚠️ **Blast radius.** `opnsense_prepare_trunk_ports` mutates an existing bridge —
 > a live-network change. It is opt-in for a deliberate, sequenced cutover only.
 
-### DHCP (`opn_dhcp`)
-
-| Variable | Default | Purpose |
-|---|---|---|
-| `opnsense_enforce_dnsmasq_disabled` | `false` | disable default Dnsmasq DHCP before enabling Kea |
-
 ### Decommission gate (`opn_edge_decommission`)
 
 | Variable | Default | Purpose |
@@ -438,8 +516,10 @@ module and `ansible.builtin.uri`).
 |---|---|---|---|
 | `opnsense_carp_password` | `OPNSENSE_CARP_PASSWORD` | empty | CARP VHID group password |
 | `opnsense_carp_vhid_base` | `OPNSENSE_CARP_VHID_BASE` | `1` | base VHID; per-zone VHID = base + VLAN |
+| `opnsense_carp_advskew` | — | `0` | 0 = master; host_vars override for backup |
 | `opnsense_hasync_username` | `OPNSENSE_HASYNC_USERNAME` | `root` | config-sync user |
 | `opnsense_hasync_password` | `OPNSENSE_HASYNC_PASSWORD` | empty | config-sync password |
+| `opnsense_hasync_pfsyncversion` | — | `1400` | pfsync protocol (OPNsense 24.7+) |
 | `opnsense_hasync_syncitems` | — | aliases, rules, nat, virtualip, dhcpd, unbound | sections to sync |
 
 ### Bootstrap (`opn_bootstrap_apikey`)
@@ -526,31 +606,32 @@ forward internal queries to), `cluster_domain` (the internal split-horizon zone)
 
 ### The firewall matrix
 
-Inter-zone policy is a table, not procedural rules. Each row is rendered into one
-firewall rule, matched on its description (which makes it idempotent — see §15).
+Inter-zone policy is a table, not procedural rules. Each row carries an explicit
+sequence number for deterministic pf ordering and is rendered into one firewall
+rule, matched on its description (which makes it idempotent — see §15).
 
 ```yaml
 # shared/netspec/firewall_matrix.yml (excerpts)
 firewall_matrix:
-  wan_egress:
-    - {from: mgmt, to: wan, action: pass, proto: any, desc: "mgmt to internet"}
+  dhcp_allow:
+    - {seq: 10, from: mgmt, to: any, action: pass, proto: udp, src: any, port: 67, desc: "dhcp server mgmt"}
   isolation:
-    - {from: iot, to: mgmt, action: block, proto: any, desc: "iot deny mgmt"}
+    - {seq: 100, from: iot, to: mgmt, action: block, proto: any, desc: "iot deny mgmt"}
   allows:
-    - {from: mgmt, to: cluster_dns, action: pass, proto: "TCP/UDP", port: 53, desc: "mgmt to dns"}
+    - {seq: 203, from: mgmt, to: cluster_dns, action: pass, proto: "TCP/UDP", port: 53, desc: "mgmt to dns"}
+  wan_egress:
+    - {seq: 400, from: mgmt, to: wan, action: pass, proto: any, desc: "mgmt to internet"}
 ```
 
-| Group | Intent |
-|---|---|
-| `wan_egress` | per-zone egress to the internet |
-| `isolation` | explicit inter-zone denies (e.g. IoT cannot reach management) |
-| `allows` | explicit permits that override isolation |
+| Group | Sequence range | Intent |
+|---|---|---|
+| `dhcp_allow` | 10–19 | DHCP server allow (UDP 67); required because `fw_rules: false` on Kea |
+| `isolation` | 100–199 | explicit inter-zone denies; block rules before pass on the same interface |
+| `allows` | 200–299 | explicit permits (mgmt lateral, DNS port 53 per zone) |
+| `wan_egress` | 400–499 | per-zone egress to the internet |
 
-The matrix is easier to reason about as a reachability graph than as a list of
-rows. The diagram below renders the example policy: every zone egresses to the
-internet, management reaches every zone, all zones reach the cluster DNS resolver,
-and the untrusted zones (IoT, DMZ) are denied lateral access to management and the
-cluster.
+All rules use `quick: true` (pf first-match semantics) and `direction: in`
+(filter on the source interface inbound).
 
 ```mermaid
 graph LR
@@ -583,10 +664,7 @@ graph LR
     style DNS fill:#2d5016,color:#fff
 ```
 
-Solid edges are permits; dashed edges are explicit denies. Reading the graph
-confirms the design intent: management is the only zone with lateral reach, the
-untrusted zones can resolve names and reach the internet but nothing else
-internal, and the existing cluster LAN is reachable only from management.
+Solid edges are permits; dashed edges are explicit denies.
 
 ### Per-deployment overrides
 
@@ -612,8 +690,7 @@ netspec_overrides:
 
 The collection contains nine roles. One (`opn_bootstrap_apikey`) runs over SSH and
 is invoked by its own playbook; the other eight are API-driven and composed by
-`site.yml` in dependency order. Each subsection below gives the role's purpose, its
-inputs, its sequence, and the behaviors worth knowing before running it.
+`site.yml` in dependency order.
 
 ```mermaid
 graph LR
@@ -631,79 +708,77 @@ graph LR
 
 ### §9.1 opn_connect
 
-**Purpose.** Verify the API answers and the key authenticates before any mutating
-role runs. Read-only.
-
-It issues a single list request and asserts the response carries data. A failure
-here is the clearest possible signal that credentials or reachability are wrong,
-and it stops the run before anything is changed. It is tagged `connect` and
-`always`, so it runs at the start of every play.
-
-| Input | Source |
-|---|---|
-| connection variables | role defaults / environment |
+Read-only API probe. Issues a single list request and asserts the response
+carries data. Tagged `connect` and `always`.
 
 ### §9.2 opn_system
 
-**Purpose.** Establish the system baseline: sysctl tunables, and optionally system
-identity and WAN.
-
-Tunables are managed as a resource: the role reads the current values, computes
-drift, and writes only what changed, producing a truthful changed result.
-Identity and WAN are different — they are applied through OPNsense's initialsetup
-wizard, which has first-boot semantics, so they are gated behind
-`opnsense_apply_identity` (off by default) and are not check-mode dry-runnable.
+Sysctl tunables via `core/tunables` GET-diff-POST (real idempotency). Identity
+and WAN via `core/initialsetup` wizard (gated by `opnsense_apply_identity`).
+Default tunables: `net.inet.carp.senderr_demotion_factor: 240`,
+`net.inet.carp.log: 2`.
 
 > ⚠️ Identity/WAN run the wizard. Leave `opnsense_apply_identity: false` until a
 > deliberate identity change is intended.
 
 ### §9.3 opn_interfaces
 
-**Purpose.** Create the Layer-2/Layer-3 VLAN interfaces: a deny-all native
-blackhole VLAN per trunk, and each zone's tagged VLAN on every trunk it rides.
+VLAN sub-interfaces on trunk ports: blackhole VLAN 3999 per trunk, zone VLANs
+per netspec. Optional trunk-port preparation (bridge mutation) and interface
+slot assignment, both off by default.
 
-The role builds a zone-to-trunk assignment list from the netspec, creates the
-blackhole VLANs, creates the zone VLANs, and applies the interface reload once.
-Two optional, off-by-default capabilities live here: preparing trunk ports by
-removing them from an existing bridge (a live mutation), and assigning VLAN
-devices to interface slots.
-
-> 🔬 **Deeper.** Interface assignment maps a device to an `optN` slot but does not
-> set the per-interface IP, which has no REST endpoint in current OPNsense; a
-> zone's gateway address is configured outside this automation. Assignment alone
-> does not make a zone routable, which is why it is opt-in.
+> 🔬 **Deeper.** The OPNsense MVC API does not expose per-interface IP
+> configuration on opt* interfaces. After VLAN creation, the operator assigns
+> IPs via the OPNsense web UI before advancing to the `migrating` phase. This
+> is documented in the spikebusting ceremony (`SPIKEBUSTING.md`, Phase 3).
 
 ### §9.4 opn_dns
 
-**Purpose.** Configure the Unbound resolver and split-horizon forwarding, and
-create static host reservations.
+Hardened Unbound resolver with split-horizon forwarding and DNS-layer threat
+blocking:
 
-It enables Unbound, forwards the internal zone to the cluster resolver, and
-creates static host records for hosts that must resolve by name (Kea does not
-register dynamic leases in Unbound, so only static reservations resolve).
-Reservations are matched on a composite key (hostname, domain, record type) so
-re-runs detect an address change as a change rather than creating a duplicate.
+1. **General settings** via `oxlorg.opnsense.unbound_general`: enabled, port 53,
+   DNSSEC, static mapping registration for Kea reservations.
+2. **Security hardening** via raw API to `unbound.advanced.*`: identity hiding,
+   DNSSEC enforcement, rebinding protection, cache poisoning detection, cache
+   sizing, observability (extended statistics, SERVFAIL logging, DNSSEC
+   validation logging).
+3. **ACL default action** set to `refuse` via raw API to `unbound.acls.*`. All
+   unknown sources are refused; explicit per-zone `allow` ACLs for mgmt, iot,
+   dmz, and cluster subnets.
+4. **DNSBL** via raw API to `unbound.dnsbl.*`: Abuse.ch ThreatFox IOC and Hagezi
+   Threat Intelligence Feeds enabled by default.
+5. **Forward zone**: `home.arpa` → CoreDNS at `10.0.0.51`, with
+   `privatedomain: home.arpa` (allow RFC 1918 in responses) and
+   `insecuredomain: home.arpa` (bypass DNSSEC for unsigned CoreDNS responses).
+6. **Static host reservations** for operator-defined entries.
 
 ### §9.5 opn_dhcp
 
-**Purpose.** Serve per-zone DHCP from Kea, disabling the conflicting default
-Dnsmasq service first.
+Kea DHCPv4 with per-zone scopes, phase-gated (`zone_dhcp`, off at `coexist`):
 
-DHCP is gated by the phase (`zone_dhcp`, off at `coexist`) so it does nothing
-until clients are meant to move. When active, it disables Dnsmasq (if
-`opnsense_enforce_dnsmasq_disabled`), enables Kea on the DHCP-serving zone
-gateways, and creates a subnet per zone with its pool, gateway, and DNS.
+1. Dnsmasq disabled (conflicts with Kea on the same interfaces).
+2. Kea enabled with `socket_type: udp` (pf-gated; raw bypasses pf),
+   `fw_rules: false` (DHCP allow rules in the firewall matrix), and socket
+   retry configuration via raw API (`service_sockets_max_retries: 5`).
+3. Per-zone subnets with `auto_options: false` and explicit routers/dns/domain.
+4. Per-subnet hardening via raw API: `allocator`, `match-client-id`,
+   `valid_lifetime` set per zone after the oxlorg module creates the subnet.
 
 ### §9.6 opn_firewall
 
-**Purpose.** Render the zone aliases and the inter-zone firewall matrix into
-rules, wrapped in a savepoint for safety.
+Zone aliases, DHCP allow rules, and the inter-zone policy matrix — all
+savepoint-wrapped:
 
-The sequence is deliberate: create network aliases (one per zone, plus a cluster
-DNS host alias) and reload them; create a filter savepoint; apply the flattened
-matrix rows as rules; reload; verify the API is still reachable; and only then
-cancel the savepoint's auto-rollback. If verification fails or the run is
-interrupted, the server-side timer reverts the filter section.
+1. Network aliases (one per zone) and a `cluster_dns` host alias, created and
+   applied before the savepoint.
+2. Savepoint create on the filter controller.
+3. Flattened matrix rows applied as rules with explicit `sequence`, `quick: true`,
+   `direction: in`. DHCP allow rules (seq 10–12, UDP 67) run first. Isolation
+   blocks (seq 100–103) run before allows (seq 200–205) on the same interface.
+   WAN egress (seq 400–403) last.
+4. Reload, verify API reachable, cancel rollback (commit). If verification fails
+   or the run is interrupted, the 60-second server timer auto-reverts.
 
 ```mermaid
 sequenceDiagram
@@ -722,27 +797,26 @@ sequenceDiagram
     end
 ```
 
-> 🔬 **Deeper — no outbound NAT.** The collection does not create masquerade NAT
-> rules. OPNsense's automatic outbound NAT already masquerades internal zones to
-> the WAN address, and the upstream `nat_source` module requires a concrete
-> translation target (it does not express interface-address masquerade). Manual
-> SNAT here would only duplicate the automatic behavior. Explicit `nat_source`
-> rules are added only for specific source translations that must override
-> automatic NAT. See §16.
+The collection does not create masquerade NAT rules. OPNsense's automatic
+outbound NAT already masquerades internal zones to the WAN address. For HA
+deployments, the operator switches to manual outbound NAT with the CARP VIP
+as the translation target.
+
+> 🔬 **Deeper — automation namespace.** All rules are in `Firewall → Automation`
+> (MVC namespace), isolated from `Firewall → Rules` (legacy namespace).
+> Automation rules process before legacy rules on the same interface.
 
 ### §9.7 opn_ha
 
-**Purpose.** Configure CARP virtual IPs, the HA configuration sync, and trigger a
-sync to the peer. Runs only when `opnsense_ha_enabled` is set by the deployment.
+CARP VIPs, HA configuration sync, and explicit sync trigger. Gated by
+`opnsense_ha_enabled`. Creates a CARP VIP per zone gateway with a unique VHID
+(`opnsense_carp_vhid_base + vlan_tag`), configures hasync with
+`pfsync_version: 1400` (OPNsense 24.7+), and on the master triggers
+`core/hasync_status/restart_all` to push configuration to the backup.
 
-It asserts a dedicated SYNC zone exists (pfsync must not ride the data trunk),
-creates a CARP VIP per zone gateway with a unique VHID, configures hasync, and on
-the master triggers a config sync and HA-service restart on the peer.
-
-The topology is two firewalls sharing a virtual gateway address per zone. Clients
-point at the CARP VIP; CARP elects one firewall as master, and pfsync replicates
-state over a dedicated SYNC segment so the backup can take over without dropping
-connections. Configuration is synced from master to backup over the same segment.
+The per-node identity (`opnsense_carp_advskew`, 0 for master, higher for backup)
+comes from inventory `host_vars`; everything else — the VIP addresses, VHIDs, and
+sync items — is derived from the netspec and the HA variables.
 
 ```mermaid
 graph TB
@@ -765,117 +839,87 @@ graph TB
     style VIP fill:#1f3a5f,color:#fff
 ```
 
-The per-node identity (`opnsense_carp_advskew`, 0 for master, higher for backup)
-comes from inventory `host_vars`; everything else — the VIP addresses, VHIDs, and
-sync items — is derived from the netspec and the HA variables.
-
 > ⚠️ HA requires a second node and the dedicated SYNC segment. Enable only when the
 > peer and sync zone are present.
 
 ### §9.8 opn_edge_decommission
 
-**Purpose.** Withdraw edge DHCP/DNS from the legacy cluster segment — the only
-role that removes service from the existing LAN. Gated on the `converged` phase.
-
-Before removing anything it queries active Kea leases on the cluster segment and
-asserts there are none (`opnsense_require_zero_leases`, on by default). The
-withdrawal is therefore backed by measured evidence, not just the phase value: a
-device that has not relocated blocks the decommission rather than being stranded.
+Withdraws edge DHCP/DNS from the legacy cluster segment. Evidence-gated: queries
+active Kea leases via `kea/leases4/search` and asserts `stats.active == 0`.
 
 > ⚠️ **Blast radius.** This role removes service from the live LAN. The evidence
-> gate is a safety, not a formality; overriding it is a deliberate operator
-> decision.
+> gate is a safety, not a formality.
 
 ### §9.9 opn_bootstrap_apikey
 
-**Purpose.** Mint the first API key over SSH as root, so the API-driven roles have
-a credential. Invoked by `bootstrap.yml`, not `site.yml`. Full lifecycle in §12.
-
-It renders a mint script to the box, runs it as root (the script uses OPNsense's
-own auth model to create and persist a key), removes the script, parses the
-result, and writes the key/secret to the deployment's `.env`. It is idempotent and
-non-accumulating: without `force` it does nothing when a key exists; with `force`
-it mints a new key and deletes the prior keys for the user, so exactly one key
-remains.
+SSH/root API key mint. Renders a PHP mint script to the box, runs it as root
+(the script uses OPNsense's auth model to create and persist a key), removes
+the script, parses the result, and writes the key/secret to the deployment's
+`.env`. Username sanitized to `[a-zA-Z0-9._-]` at template render time.
+Idempotent and non-accumulating: without `force` it does nothing when a key
+exists; with `force` it mints a new key and deletes the prior keys for the
+user, so exactly one key remains. Full lifecycle in §12.
 
 ---
 
 ## §10 — Troubleshooting
 
-This section is organized symptom → cause → fix. Each entry is independent; an
-operator can scan to the symptom and stop.
-
 ### §10.1 `opn_connect` fails with 401 Authentication Failed
 
 | Likely cause | Check | Fix |
 |---|---|---|
-| Credentials not in the environment | confirm `OPNSENSE_API_KEY`/`SECRET` are exported in the shell that runs ansible | load them (`direnv allow`, or source the env file) |
-| Wrong values reaching the playbook | run with `-v` and read which values file the `Load operator values` task loads | point the entrypoint at the right values file (§11) |
-| Key not actually on the box | mint or rotate a key (§12) | re-run bootstrap with `force` |
-| `lookup('env')` empty because ansible did not inherit the shell env | run the playbook from the shell where the variables are exported, or wrap with `direnv exec <dir>` | use the deploy entrypoint, which loads the env |
+| Credentials not in environment | confirm `OPNSENSE_API_KEY`/`SECRET` exported | `direnv allow`, or source `.env` |
+| Key not on the box | mint or rotate (§12) | re-run bootstrap with `force` |
+| `lookup('env')` empty | ansible not inheriting shell env | use `direnv exec <dir> ansible-playbook ...` |
 
-> 💡 To prove a credential independent of Ansible, call the API directly:
-> `curl -k -u "$OPNSENSE_API_KEY:$OPNSENSE_API_SECRET" https://<fw>/api/core/firmware/status`.
-> A 200 means the credential is valid and the problem is variable propagation, not
-> the key.
+> 💡 Prove a credential independently:
+> `curl -k -u "$OPNSENSE_API_KEY:$OPNSENSE_API_SECRET" https://<fw>/api/core/firmware/status`
 
-### §10.2 A role fails with "could not resolve the module_defaults group"
+### §10.2 "could not resolve the module_defaults group"
 
-The deployment's collections are not installed into a path Ansible searches.
-Install them into the playbook-adjacent `collections/` directory:
+Collections not installed. Run:
+`ansible-galaxy collection install -r requirements.yml -p collections`
 
-```bash
-ansible-galaxy collection install -r requirements.yml -p collections
-```
+### §10.3 FQCN role "not found"
 
-The deploy entrypoint does this automatically on environment load.
+Same as §10.2. Confirm `collections/ansible_collections/containercraft/opnsense`
+exists.
 
-### §10.3 An FQCN role is "not found"
+### §10.4 Variables resolve empty
 
-A playbook references `containercraft.opnsense.<role>` but the collection is not
-installed where it is searched. The deployment installs into the playbook-adjacent
-`collections/` directory, which Ansible always searches regardless of
-`ANSIBLE_COLLECTIONS_PATH`. Confirm `collections/ansible_collections/containercraft/opnsense`
-exists; re-install if not (§10.2).
+`lookup('env', ...)` reads the ansible process environment. Launch from the
+configured deploy shell or use `direnv exec`.
 
-### §10.4 Variables resolve empty even though the env is set
+### §10.5 Firewall apply reverted itself
 
-`lookup('env', ...)` reads the environment of the ansible process. If the playbook
-is launched from a shell that did not export the variables, the lookup returns
-empty. Launch from the configured deploy shell, or use `direnv exec <deploy-dir>
-ansible-playbook ...` to load the environment first.
+The savepoint auto-reverted because verification did not complete in time. Re-run
+the role.
 
-### §10.5 The firewall apply reverted itself
+### §10.6 `dig @10.0.0.1 test.home.arpa` returns "localhost"
 
-`opn_firewall` wraps changes in a savepoint that auto-reverts if the post-apply
-verification does not complete in time. If a run is interrupted between apply and
-commit, the filter section reverts by design. Re-run the role; the savepoint
-mechanism is what prevents a bad rule from locking the operator out.
+The built-in `home.arpa` static local zone is intercepting queries before the
+forward zone. Verify `insecuredomain` and `privatedomain` are set to `home.arpa`
+in `unbound.advanced`. The built-in zone serves `NS localhost` and
+`SOA localhost` — if these appear in responses, the hardening raw API task did
+not apply correctly.
 
-### §10.6 Python interpreter discovery warning
+### §10.7 DHCP clients get no address
 
-A warning that the host is using a discovered Python interpreter is informational
-and does not affect API-driven runs (the modules run on the controller). It can be
-silenced by setting `ansible_python_interpreter` explicitly if desired.
+Verify: (1) `phase.zone_dhcp` is `true` (phase is `migrating` or later),
+(2) `opnsense_enforce_dnsmasq_disabled` is `true` and Dnsmasq is off,
+(3) interface IPs are assigned on zone gateways (manual step),
+(4) DHCP allow rules (seq 10–12) exist in the firewall,
+(5) Kea `socket_type` is `udp` (if `raw`, pf rules do not gate DHCP traffic).
 
 ---
 
 ## §11 — The iterative rollout runbook
 
-The collection is designed to be applied a little at a time. The pattern is: keep
-every optional capability disabled, advance one role (or one toggle) per iteration,
-dry-run, read the diff, then apply. This section is the operational procedure.
-
 ### Principles
 
-- **One change per iteration.** Run a single tag, or flip a single toggle, then
-  re-run that tag.
-- **Dry-run before every apply.** `--check --diff` shows exactly what will change.
-- **Stay in `coexist` until clients are ready to move.** Advancing the phase is
-  itself an iteration.
-
-Every iteration is the same short loop, repeated per concern. The discipline is in
-never skipping the dry-run and never advancing two things at once.
+- **One change per iteration.** Run a single tag, or flip a single toggle.
+- **Dry-run before every apply.** `--check --diff` shows exactly what changes.
+- **Stay in `coexist` until interfaces have IPs and switches are configured.**
 
 ```mermaid
 graph LR
@@ -896,24 +940,27 @@ graph LR
 # 0. Prove connectivity and credentials.
 ./stargate.yml --tags connect
 
-# 1. System baseline (tunables only; identity stays off).
+# 1. System baseline (CARP tunables; identity stays off).
 ./stargate.yml --tags system --check --diff
 ./stargate.yml --tags system
 
-# 2. Interfaces (zone VLANs + blackhole). Review the would-create set first.
+# 2. Interfaces (zone VLANs + blackhole).
 ./stargate.yml --tags interfaces --check --diff
 ./stargate.yml --tags interfaces
 
-# 3. DNS.
+# 3. DNS (hardened Unbound, DNSBL, ACLs, forward zone).
 ./stargate.yml --tags dns --check --diff
 ./stargate.yml --tags dns
 
-# 4. Firewall (aliases + zone rules).
+# 4. Firewall (DHCP allow + isolation + allows + egress, savepoint-wrapped).
 ./stargate.yml --tags firewall --check --diff
 ./stargate.yml --tags firewall
 
-# 5. Advance the phase when clients are ready to move, then enable zone DHCP.
-#    Set OPNSENSE_NETWORK_PHASE=migrating (or in the values file), and:
+# 5. Assign interface IPs in the OPNsense web UI (manual step — see SPIKEBUSTING.md Phase 3).
+# 6. Configure switches with VLAN trunks (manual step — see SPIKEBUSTING.md Phase 4).
+
+# 7. Advance phase and enable zone DHCP.
+#    Set OPNSENSE_NETWORK_PHASE=migrating and opnsense_enforce_dnsmasq_disabled=true.
 ./stargate.yml --tags dhcp --check --diff
 ./stargate.yml --tags dhcp
 ```
@@ -921,8 +968,8 @@ graph LR
 ### The values file as the iteration surface
 
 A deployment's values file disables every optional capability so a full run is
-minimal, and documents how to flip each one. Each toggle is a single iteration:
-set it true, re-run that role's tag with `--check --diff`, read the diff, apply.
+minimal. Each toggle is a single iteration: set it, re-run that role's tag
+with `--check --diff`, read the diff, apply.
 
 ```yaml
 # vars/<deploy>_values.yml (capability toggles, all disabled to start)
@@ -934,17 +981,14 @@ opnsense_ha_enabled: false            # flip when the HA peer exists
 opnsense_require_zero_leases: true    # safety gate — leave on
 ```
 
-> 💡 The two levers are `--tags` (which role) and the toggles (which capability
-> within a role). Combined, they make every step small, reviewable, and
-> reversible.
+The deployment includes a `SPIKEBUSTING.md` ceremony document with checkbox
+verification for every phase, including manual steps (interface IP assignment
+in the web UI, switch VLAN configuration). The ceremony covers the full path
+from `coexist` through `migrating` with zone isolation verification.
 
 ---
 
 ## §12 — Bootstrap and the credential lifecycle
-
-An API-configured firewall needs an API key before it can be configured, and
-minting that key writes root-owned configuration that the API cannot write. The
-bootstrap role resolves this with a single, deliberate SSH-as-root operation.
 
 ```mermaid
 sequenceDiagram
@@ -963,19 +1007,11 @@ sequenceDiagram
     Note over ENV: subsequent API-driven runs read these
 ```
 
-### Lifecycle states
-
-The mint script enforces idempotency and prevents credential accumulation:
-
 | Condition | Behavior | Result |
 |---|---|---|
 | key exists, no `force` | do nothing | `exists`; `.env` unchanged |
 | no key, no `force` | mint one | `created`; `.env` written |
 | `force` | mint new, then delete all prior keys for the user | `created`; exactly one key remains |
-
-The same logic as a decision flow — the branch on `force` is what guarantees both
-idempotency (a no-op when a usable key exists) and no accumulation (rotation
-leaves exactly one key):
 
 ```mermaid
 graph TD
@@ -993,16 +1029,7 @@ graph TD
 
 The plaintext secret is returned exactly once at creation and is not retrievable
 afterward (OPNsense stores it hashed). If a key exists but its secret was not
-captured, the only way to obtain a usable secret is to rotate with `force`. The
-old key remains valid until rotation deletes it, so rotation does not cause an
-outage.
-
-> 🔬 **Deeper.** The mint script uses OPNsense's own auth model (`getUserByName`,
-> the API-key field's `add`/`del`/`all`, and `serializeToConfig` +
-> `Config::save()` under a config lock) rather than manipulating `config.xml`
-> directly. Counting before and after with the same model call is what makes the
-> persistence check correct; an apples-to-oranges count would falsely report
-> failure.
+captured, the only way to obtain a usable secret is to rotate with `force`.
 
 > ⚠️ A dedicated, least-privilege service user is recommended as the API-key
 > holder, distinct from the SSH/wheel user used to run bootstrap.
@@ -1010,9 +1037,6 @@ outage.
 ---
 
 ## §13 — Architecture: a run end to end
-
-This section traces a full `site.yml` run so a reader can see how the pieces
-compose. It is read-once material; the per-role detail is in §9.
 
 ```mermaid
 sequenceDiagram
@@ -1032,44 +1056,31 @@ sequenceDiagram
     ROLES->>FW: verify; commit (firewall savepoint)
 ```
 
-The flow has four stages:
-
 1. **Entry.** The executable entrypoint selects the deployment's values file and
-   imports the generic `site.yml`. The site's identity lives only in the
-   entrypoint.
-2. **Data load.** `pre_tasks` load the netspec, phase map, and firewall matrix
-   from `shared/netspec/`, load the deployment's values, deep-merge any netspec
-   overrides, and resolve the phase to its capability booleans.
-3. **Role composition.** `site.yml` runs the eight API-driven roles in dependency
-   order. Each role configures its objects with deferred reloads, then issues a
-   single reload, and the firewall role additionally wraps its changes in a
-   savepoint.
+   imports the generic `site.yml`.
+2. **Data load.** `pre_tasks` load the netspec, phase map, firewall matrix, and
+   operator values, then deep-merge overrides and resolve phase capabilities.
+3. **Role composition.** Eight API-driven roles in dependency order. Each
+   configures objects with deferred reloads, then issues a single reload. The
+   firewall role wraps its changes in a savepoint. The DNS role applies
+   hardening and DNSBL via raw API. The DHCP role applies per-subnet overrides
+   via raw API after the typed module creates the subnets.
 4. **Convergence.** Re-running produces no changes once the firewall matches the
-   declared state. A phase advance changes which roles act, not how they act.
+   declared state.
 
 ---
 
 ## §14 — The collection / deploy split, in depth
 
-§5 introduced the boundary; this section explains why it is drawn exactly where it
-is, for readers extending or maintaining the project.
-
 ### Why the collection holds only roles
 
-A published collection is consumed by people who do not have this repository's
-deploy tree. For their install to work, **every variable a role reads must have a
-default inside that role.** If a role depended on a variable defined only in this
-repository's `group_vars`, a galaxy install would reference an undefined variable
-and fail. Each role therefore carries a complete `defaults/main.yml` with generic,
-environment-overridable values — the connection surface, the role's own toggles,
-and safe data fallbacks that make the role a no-op rather than an error when run
-without site data.
+Every variable a role reads has a default inside that role. A galaxy install
+works without the deploy tree.
 
 ### Why the deploy layer holds identity
 
-The site's identity — its box name, its inventory, its real network data, its
-credentials — is not reusable and must not leak into the published artifact. It
-lives in `deploy/opnsense/`:
+The site's name, inventory, real network data, and credentials are not reusable
+and must not leak into the published artifact. It lives in `deploy/opnsense/`:
 
 | Deploy artifact | Role |
 |---|---|
@@ -1081,12 +1092,6 @@ lives in `deploy/opnsense/`:
 
 ### How values reach a generic playbook
 
-`site.yml` is generic and must not name a site's values file. The entrypoint sets
-the `values_file` variable through the `vars:` it passes to `import_playbook`,
-which propagates to the imported play; `site.yml`'s optional `include_vars` then
-loads that file. The result: one executable per site, a generic playbook shared by
-all sites, and the site name confined to the entrypoint.
-
 ```yaml
 # deploy/opnsense/stargate.yml
 #!/usr/bin/env -S ansible-playbook --inventory=inventory/hosts.yml
@@ -1096,40 +1101,40 @@ all sites, and the site name confined to the entrypoint.
     values_file: "{{ playbook_dir }}/vars/stargate_values.yml"
 ```
 
-> 🔬 **Deeper.** `import_playbook` propagates `vars:` to the imported plays but not
-> `vars_files:`. Setting `values_file` via `vars:` is therefore the mechanism that
-> lets a generic `site.yml` load a site-specific values file without naming it.
+`import_playbook` propagates `vars:` to the imported plays but not `vars_files:`.
+Setting `values_file` via `vars:` is the mechanism that lets a generic `site.yml`
+load a site-specific values file without naming it. One executable per site, a
+generic playbook shared by all sites.
 
 ---
 
 ## §15 — Idempotency, savepoints, and the safety model
 
-Three mechanisms make the automation safe to run repeatedly against a live device.
-
 ### Description-keyed idempotency
 
-Most objects are matched on their description, which carries the managed-by prefix
-(`opnsense_managed_tag`). Because the match field is the description, re-running
-finds the existing object and updates it in place rather than creating a duplicate.
-Changing a managed value is detected as a change; running again with no change is a
-no-op. Composite keys are used where a description is insufficient (for example,
-Unbound host records match on hostname + domain + record type).
+Most objects are matched on their description, which carries the managed-by
+prefix (`opnsense_managed_tag`). Re-running finds the existing object and updates
+it in place rather than creating a duplicate. Changing a managed value is detected
+as a change; running again with no change is a no-op. Composite keys are used
+where a description is insufficient (for example, Unbound host records match on
+hostname + domain + record type).
 
 ### Savepoint rollback
 
-Firewall filter changes can lock out the operator if a rule is wrong. The firewall
-role wraps its changes in a server-side savepoint: it applies the rules, verifies
-the API is still reachable, and only then cancels the savepoint's auto-rollback.
-If the verification does not complete within the server's timer window, the filter
-section reverts automatically. The operator cannot be permanently locked out by a
-bad apply.
+Firewall filter changes can lock out the operator if a rule is wrong. The
+firewall role wraps its changes in a server-side savepoint: it applies the rules,
+verifies the API is still reachable, and only then cancels the savepoint's
+auto-rollback. If the verification does not complete within the 60-second timer
+window, the filter section reverts automatically. The operator cannot be
+permanently locked out by a bad apply. The savepoint covers `firewall/filter`
+only — not interfaces, DHCP, or DNS.
 
 ### Deferred reloads
 
 Bulk object tasks set `reload: false` and each role issues a single reload per
 subsystem at its end. This avoids applying a half-built configuration and reduces
-churn. It also means a run that is interrupted mid-role generally leaves staged but
-un-applied changes rather than a partial live configuration.
+churn. A run interrupted mid-role generally leaves staged but un-applied changes
+rather than a partial live configuration.
 
 ```mermaid
 graph TD
@@ -1147,9 +1152,8 @@ graph TD
 
 ## §16 — The oxlorg.opnsense dependency seam
 
-`containercraft.opnsense` orchestrates; the upstream `oxlorg.opnsense` collection
-implements the API modules. Keeping this seam clear explains both what the roles
-can do and where their boundaries are.
+`containercraft.opnsense` orchestrates; `oxlorg.opnsense` implements the API
+modules.
 
 | Concern | Owned by |
 |---|---|
@@ -1157,19 +1161,15 @@ can do and where their boundaries are.
 | Which objects to create and in what order | `containercraft.opnsense` roles |
 | The network's shape (zones, trunks, matrix) | `shared/netspec/` data |
 | Credential injection into module calls | `module_defaults` action group |
-
-As layers, the seam looks like this: data and roles are this collection's; the
-module that speaks to the firewall is upstream's; and credentials are injected
-into upstream's modules by `module_defaults`, except for the `raw`/`uri` tasks
-that sit outside the action group and carry credentials explicitly.
+| Fields not exposed by typed modules | `oxlorg.opnsense.raw` API calls |
 
 ```mermaid
 graph TB
     DATA["shared/netspec/ data<br/>(zones, trunks, matrix)"]
     ROLES["containercraft.opnsense roles<br/>(what to create, in what order)"]
-    MD["module_defaults<br/>group/oxlorg.opnsense.all<br/>(injects credentials)"]
+    MD["module_defaults<br/>group/oxlorg.opnsense.all<br/>(injects credentials + timeout + retries)"]
     OXL["oxlorg.opnsense modules<br/>(speak the REST protocol)"]
-    RAW["raw / uri tasks<br/>(outside the action group)"]
+    RAW["raw API tasks<br/>(hardening, per-subnet overrides, DNSBL, ACL default)"]
     API["OPNsense REST API"]
 
     DATA --> ROLES
@@ -1184,42 +1184,30 @@ graph TB
     style RAW fill:#5c2d00,color:#fff
 ```
 
-Two consequences follow from this seam:
-
-- **Module capabilities are upstream's to define.** When a module requires a
-  particular argument (for example, `nat_source` requires a concrete translation
-  target and does not express interface-address masquerade), that is an upstream
-  design boundary. The collection works within it rather than around it — which is
-  why outbound NAT is left to OPNsense's automatic behavior (§9.6).
-- **Credential injection depends on action-group membership.** The
-  `module_defaults` group injects the connection arguments only into modules that
-  upstream lists in its action groups. The `raw` module and `ansible.builtin.uri`
-  are not in that group, so tasks using them pass the connection arguments
-  explicitly via `opnsense_api_args`.
+The `module_defaults` group injects the connection arguments (including
+`api_timeout` and `api_retries`) into all modules that upstream lists in its
+action groups. The `raw` module and `ansible.builtin.uri` are not in that group,
+so tasks using them pass the connection arguments explicitly via
+`opnsense_api_args`.
 
 > 🔬 **Deeper.** Upstream pins matter. The collection declares an exact dependency
 > (`oxlorg.opnsense == <version>`) because module argument specs and action-group
-> membership change between versions, and the roles are written against a specific
-> contract. Upgrading the dependency is a deliberate, tested change.
+> membership change between versions. Upgrading the dependency is a deliberate,
+> tested change.
 
 ---
 
 ## §17 — Extending the collection
 
-This section is for contributors adding capability. It assumes familiarity with
-§9 and §14.
-
 ### Add a zone
 
-A zone is data. Add an entry to `shared/netspec/zones.yml` (or to a deployment's
-`netspec_overrides`) with the standard shape (§8). No role changes are required;
-the interfaces, DNS, DHCP, and firewall roles all iterate the zone dictionary.
+A zone is data. Add an entry to `shared/netspec/zones.yml` with the standard
+shape. No role changes required.
 
 ### Add a firewall rule
 
-A rule is a row in `shared/netspec/firewall_matrix.yml`. Add it to the appropriate
-group (`wan_egress`, `isolation`, or `allows`) with a unique description. The
-firewall role flattens the groups and renders each row.
+A rule is a row in `shared/netspec/firewall_matrix.yml` with a unique `seq` and
+`desc`. The firewall role flattens all groups and applies each row.
 
 ### Add a phase capability
 
@@ -1229,22 +1217,11 @@ phase map stays total, then gate the role's task on `phase.<capability>`.
 
 ### Add a role
 
-A new role joins the collection under `roles/`. To keep the collection
-self-contained and publishable:
-
-1. Give the role a complete `defaults/main.yml`: the connection surface, its own
-   toggles, and safe data fallbacks (§14).
-2. Give it a real `meta/main.yml` with `galaxy_info` (author, license,
-   `min_ansible_version`) — not placeholder scaffolding.
-3. Prefix role-private variables with the role name
-   (`<role>_<var>`) to satisfy the variable-naming rule.
-4. Compose it into the deploy's `site.yml` with an FQCN reference
-   (`containercraft.opnsense.<role>`) and a tag.
-
-> 🔬 **Deeper.** Match the existing roles' shape exactly: deferred reloads,
-> description-keyed idempotency, check-mode guards on tasks that cannot dry-run,
-> and the savepoint pattern for anything that can sever connectivity. Consistency
-> across roles is what makes the collection learnable.
+Give the role a complete `defaults/main.yml` with the connection surface, its own
+toggles, and safe data fallbacks. Compose it into `site.yml` with an FQCN
+reference and a tag. Match the existing roles' shape: deferred reloads,
+description-keyed idempotency, check-mode guards on tasks that cannot dry-run,
+and the savepoint pattern for anything that can sever connectivity.
 
 ---
 
@@ -1253,24 +1230,10 @@ self-contained and publishable:
 ### Local validation
 
 ```bash
-# Lint the collection at the production profile (galaxy metadata satisfied).
 ansible-lint collections/opnsense
-
-# Build the collection artifact.
 ansible-galaxy collection build collections/opnsense --output-path build/
-
-# Dry-run the deploy against a reachable box (read-only + would-change).
 ./stargate.yml --check --diff
 ```
-
-### Continuous integration
-
-The repository's workflows lint every collection and deploy tree on pull request,
-and publish a collection on a version tag. A collection is published by pushing a
-tag named `<collection>-v<semver>`; the tag names its collection unambiguously,
-the version is stamped into `galaxy.yml` at build time, and the artifact is built
-and published. Adding a collection requires no CI change — a new
-`collections/<name>/` directory and a matching tag are sufficient.
 
 ### What makes a change mergeable
 
@@ -1281,9 +1244,11 @@ and published. Adding a collection requires no CI change — a new
   savepoint-wrapped.
 - The changelog records the change.
 
-> 🔬 **Deeper — versioning.** Collections version independently; there is no
-> repository-wide version. The `version` field in `galaxy.yml` is a placeholder
-> the publish step overwrites from the git tag, so it is never hand-edited.
+### CI
+
+The repository's workflows lint on pull request and publish on a version tag
+(`<collection>-v<semver>`). The `version` field in `galaxy.yml` is a placeholder
+the publish step overwrites from the git tag.
 
 ---
 
@@ -1298,14 +1263,16 @@ and published. Adding a collection requires no CI change — a new
 | **Blackhole VLAN** | a deny-all native VLAN per trunk; carries no addresses |
 | **Phase** | the monotonic migration state (`coexist`…`converged`) |
 | **netspec** | the network's shape declared as data in `shared/netspec/` |
-| **Firewall matrix** | inter-zone policy declared as a table of rows |
-| **Savepoint** | a server-side firewall checkpoint with an auto-revert timer |
+| **Firewall matrix** | inter-zone policy declared as a table of sequenced rows |
+| **Savepoint** | a server-side firewall checkpoint with a 60-second auto-revert timer |
 | **Managed tag** | the description prefix marking automation-owned objects; also the idempotency key |
 | **Action group** | the upstream module set into which `module_defaults` injects credentials |
 | **Deploy layer** | the site-specific tree (`deploy/<name>/`) that consumes the collection |
 | **Entrypoint** | the executable, shebang-driven playbook that carries a site's identity |
-| **CARP / pfsync** | the HA mechanisms: virtual IPs (CARP) and state sync (pfsync) |
+| **CARP / pfsync** | the HA mechanisms: virtual IPs (CARP) and state sync (pfsync v1400) |
 | **Kea / Unbound** | the DHCP server and the DNS resolver OPNsense uses |
+| **DNSBL** | DNS-based blocklist; Unbound blocks queries for known-malicious domains |
+| **Raw API** | `oxlorg.opnsense.raw` module calling OPNsense endpoints not exposed by typed modules |
 
 ### §19.2 Environment variable index
 
@@ -1335,10 +1302,11 @@ and published. Adding a collection requires no CI change — a new
 | `collections/opnsense/changelogs/` | release history |
 | `shared/netspec/zones.yml` | zones and trunks |
 | `shared/netspec/phases.yml` | phase → capability map |
-| `shared/netspec/firewall_matrix.yml` | inter-zone policy |
+| `shared/netspec/firewall_matrix.yml` | sequenced inter-zone policy |
 | `deploy/opnsense/stargate.yml` | executable site entrypoint |
 | `deploy/opnsense/site.yml` | generic orchestration |
 | `deploy/opnsense/bootstrap.yml` | API-key mint (SSH/root) |
+| `deploy/opnsense/SPIKEBUSTING.md` | validation ceremony with manual steps |
 | `deploy/opnsense/vars/*_values.yml` | per-site values |
 | `deploy/opnsense/inventory/` | API target and connection mode |
 
@@ -1346,20 +1314,20 @@ and published. Adding a collection requires no CI change — a new
 
 Each role maps to one or more OPNsense API controllers via the upstream
 `oxlorg.opnsense` modules. The authoritative mapping is the role's
-`tasks/main.yml` — the module name encodes the controller (e.g.
-`oxlorg.opnsense.interface_vlan` → `interfaces/vlan_settings`). Roles that use
-`ansible.builtin.uri` or `oxlorg.opnsense.raw` name the controller explicitly in
-the task's URL or `controller:` parameter. The bootstrap role is the sole
-exception: it operates over SSH, not REST.
+`tasks/main.yml` — the module name encodes the controller. Roles that use
+`oxlorg.opnsense.raw` name the controller explicitly in the task's `controller:`
+parameter. The raw API pattern extends the collection's reach to model fields
+not exposed by typed modules, including Unbound `advanced.*`, Kea
+`dhcpv4/set_subnet/<uuid>`, and Unbound `acls.*` / `dnsbl.*`.
 
 ### §19.5 Version compatibility
 
 | Component | Requirement |
 |---|---|
-| `ansible-core` | `>= 2.14` |
+| `ansible-core` | `>= 2.17` |
 | Python (controller) | `>= 3.12` |
 | `oxlorg.opnsense` | pinned exact version (see `galaxy.yml` dependencies) |
-| OPNsense | a release compatible with the pinned `oxlorg.opnsense` version |
+| OPNsense | 26.1 or compatible release |
 
 ---
 

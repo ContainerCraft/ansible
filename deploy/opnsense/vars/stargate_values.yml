@@ -1,24 +1,88 @@
 ---
 # Stargate deployment values. Credentials from environment (.env / sesame).
 #
+# =============================================================================
+# INFRASTRUCTURE INVENTORY — Static IPs and Physical Topology
+# =============================================================================
+#
+# OPNsense (stargate, i5-8500, 4x Intel em NIC):
+#   re0          WAN        73.48.181.18/23 (DHCP from ISP)
+#   bridge0      LAN        10.0.0.1/24    (em0 + em3 + vlan0.1.2)
+#   vlan0.10.2   MGMT       10.10.0.1/24
+#   vlan0.20.2   IOT        10.20.0.1/24
+#   vlan0.30.2   DMZ        10.30.0.1/24
+#   vlan0.100.2  CLIENTS    10.100.0.1/24
+#   vlan0.4000.1 SYNC       10.40.0.1/24
+#   vlan0.1.1    TRANSIT    (no IP, qnap trunk)
+#   vlan0.1.2    TRANSIT_POE(no IP, bridge0 member, poe trunk)
+#   em0 → QNAP port 1       bridge0 member (untagged cluster LAN)
+#   em1 → QNAP port 2       VLAN trunk (tagged 10/20/30/100)
+#   em2 → NETGEAR port 5    VLAN trunk (tagged 1/10/20/30/100, PVID=3999)
+#   em3 → Orbi WAN          bridge0 member (legacy WiFi)
+#
+# NETGEAR GS305EP (5-port PoE managed):
+#   Management IP: 10.0.0.22/24 on VLAN 1 (Kea DHCP, currently dynamic)
+#   MAC: 34:98:b5:ac:e3:0c
+#   Port 1-2: PVID=100, VLAN 100 U (client access)
+#   Port 3:   PVID=1, VLAN 1 U + tagged 10/20/30/100 (debug/workbench)
+#   Port 4:   PVID=1, VLAN 1 U + tagged 10/20/30/100 (AP)
+#   Port 5:   PVID=3999, all tagged (em2 trunk)
+#
+# QNAP QSW-M408S (8x 1G + 4x 10G SFP):
+#   Management IP: 10.0.0.21/24 on VLAN 1 (static)
+#   MAC: 24:5e:be:64:95:df
+#   Port 1:   em0 (VLAN 1 U, bridge0 carrier)
+#   Port 2:   em1 (VLAN 1 excluded, tagged 10/20/30/100, trunk)
+#   Port 3:   workbench (VLAN 1 U + tagged 10/20/30/100)
+#   Port 4:   mithril hardwire (VLAN 1 U + tagged 10/20/30/100)
+#   Port 5:   Talos t640 future (VLAN 1 U)
+#   Port 6:   Talos op1 1G (VLAN 1 U)
+#   Port 7:   Talos op2 1G (VLAN 1 U)
+#   Port 8:   Talos op3 1G (VLAN 1 U)
+#   Port 9:   Talos op1 10G SFP (VLAN 1 U + tagged 10/20/30/100)
+#   Port 10:  Talos op2 10G SFP (VLAN 1 U + tagged 10/20/30/100)
+#   Port 11:  Talos op3 10G SFP (VLAN 1 U + tagged 10/20/30/100)
+#   Port 12:  Talos t640 future 10G SFP (VLAN 1 U + tagged 10/20/30/100)
+#
+# UniFi UAP-AC-HD:
+#   Management IP: 10.0.0.x/24 on VLAN 1 (Kea DHCP via bridge0)
+#   MAC: 74:83:c2:14:af:99
+#   Firmware: 6.7.35
+#   Controller: mithril 10.0.0.184:8443 (docker compose)
+#   SSIDs:
+#     PrettyFlyForAWifi → VLAN 100 CLIENTS
+#     HackThePlanet     → VLAN 10  MGMT
+#     SkyNet            → VLAN 20  IOT
+#     TheNeutralZone    → VLAN 30  DMZ
+#
+# Talos Kubernetes Cluster (optiplexprime, 3x Dell OptiPlex):
+#   op1: 10.0.0.33/24  MAC d8:9e:f3:40:22:ac (1G) / fc:34:97:1e:79:d4 (10G)
+#   op2: 10.0.0.34/24  MAC 54:bf:64:5d:09:39 (1G) / fc:34:97:1e:79:d1 (10G)
+#   op3: 10.0.0.35/24  MAC d8:9e:f3:40:33:c8 (1G) / fc:34:97:1e:79:d2 (10G)
+#   CoreDNS LB VIP: 10.0.0.51
+#   Omni: usrbinkat.na-west-1.omni.siderolabs.io
+#
+# Mithril (Pop!_OS workstation, Dell dock):
+#   eno2: QNAP port 4, 10.0.0.184/24 (bridge0, Kea DHCP)
+#   MAC: cc:48:3a:77:f2:20
+#   UniFi controller: docker compose at 10.0.0.184:8443
+#
+# Future static IP plan (Kea reservations, not yet implemented):
+#   10.0.0.1   stargate (bridge0 gateway)
+#   10.0.0.21  QNAP switch (static, set in QSS)
+#   10.0.0.22  NETGEAR switch (static, set in NETGEAR UI)
+#   10.0.0.23  UniFi AP (Kea reservation, pending)
+#   10.0.0.33  op1 (Talos static)
+#   10.0.0.34  op2 (Talos static)
+#   10.0.0.35  op3 (Talos static)
+#   10.0.0.51  CoreDNS LB VIP (Cilium L2)
+#   10.0.0.184 mithril (Kea reservation, pending → Cilium L2 LB for UniFi)
+#
+# =============================================================================
 # ITERATIVE ROLLOUT MODEL
-# -----------------------
-# Every optional/mutating capability below is explicitly DISABLED so the rollout
-# is minimal and scoped. Bring the network up a little at a time, two levers:
-#
-#   1. --tags  — run ONE role at a time (and always dry-run first):
-#        ansible-playbook site.yml --tags connect              # API reachability
-#        ansible-playbook site.yml --tags system  --check --diff
-#        ansible-playbook site.yml --tags system               # apply
-#        ansible-playbook site.yml --tags interfaces --check --diff
-#        ... dns | dhcp | firewall | ha | decommission
-#
-#   2. toggles below — flip one false->true, then re-run that role's tag with
-#      --check --diff, read the diff, then apply. One capability per iteration.
-#
-# network_phase is the master ordering gate (coexist -> migrating -> hardening ->
-# converged). Start at coexist: the new edge stands up beside the live LAN and
-# does NOT touch 10.0.0.0/24 (no zone DHCP, no legacy decommission).
+# =============================================================================
+# ./stargate.yml --tags connect|system|interfaces|dns|dhcp|firewall|ha
+# --check --diff before every apply. One tag, one toggle per iteration.
 
 # =============================================================================
 # Migration posture — start safe, advance one phase at a time
@@ -36,69 +100,103 @@ opnsense_api_key: "{{ lookup('env', 'OPNSENSE_API_KEY') | default('', true) }}"
 opnsense_api_secret: "{{ lookup('env', 'OPNSENSE_API_SECRET') | default('', true) }}"
 opnsense_api_port: "{{ lookup('env', 'OPNSENSE_API_PORT') | default(443, true) }}"
 opnsense_ssl_verify: "{{ lookup('env', 'OPNSENSE_SSL_VERIFY') | default(false, true) | bool }}"
+opnsense_api_timeout: 30
+opnsense_api_retries: 2
 
 # =============================================================================
-# Capability toggles — ALL DISABLED. Flip ONE at a time, re-run its role's tag.
+# Capability toggles
 # =============================================================================
 
-# opn_system — apply hostname/domain/timezone + WAN via the initialsetup wizard.
-# DISABLED: wizard semantics re-run first-boot config; only enable deliberately,
-# and confirm WAN settings below match the modem-direct link before flipping.
-# Flip -> run: ansible-playbook site.yml --tags system --check --diff
-opnsense_apply_identity: false
-opnsense_hostname: "opnsense"
+# opn_system — hostname/domain/timezone + WAN via initialsetup wizard.
+opnsense_apply_identity: true
+opnsense_hostname: "stargate"
 opnsense_domain: "home.arpa"
 opnsense_timezone: "America/Los_Angeles"
 opnsense_wan_ipv4_type: "dhcp"
 opnsense_wan_block_private: true
 opnsense_wan_block_bogons: true
 
-# opn_interfaces — prepare trunk ports by removing them from an existing bridge.
-# DISABLED: this is a LIVE-network mutation (touches an existing bridge). Enable
-# only for a deliberate, sequenced cutover, with the bridge description and the
-# members to retain set below.
-# Flip -> run: ansible-playbook site.yml --tags interfaces --check --diff
-opnsense_prepare_trunk_ports: false
-opnsense_bridge_description: ""
-opnsense_bridge_keep_members: []
+# opn_interfaces — bridge0 members: opt4 (em0), opt3 (em3). opt1 (vlan0.1.2)
+# added dynamically by the bridge collection task after interface assignment.
+opnsense_prepare_trunk_ports: true
+opnsense_bridge_description: "BRIDGE0"
+opnsense_bridge_keep_members: ["opt4", "opt3"]
 
-# opn_interfaces — assign VLAN devices to interface slots (optN).
-# DISABLED: assignment alone does NOT set the per-interface IP (no REST endpoint
-# in 26.1), so it does not make a zone routable on its own. Enable only once the
-# per-interface IP addressing is handled, and provide the assignments below.
-# Flip -> run: ansible-playbook site.yml --tags interfaces --check --diff
-opnsense_assign_interfaces: false
-opnsense_interface_assignments: []
+# opn_interfaces — VLAN device assignment + IP via SSH + config.xml.
+# Gateway IPs on em2 sub-interfaces (NETGEAR/AP). em1 sub-interfaces have no
+# gateway IPs — em1 VLANs exist for trunk symmetry, not for routing.
+opnsense_assign_interfaces: true
+opnsense_interfaces_ssh_user: "barbie"
+opnsense_interface_assignments:
+  - device: "vlan0.1.1"
+    descr: "TRANSIT"
+    ipaddr: ""
+    subnet: ""
+    enable: "1"
+  - device: "vlan0.1.2"
+    descr: "TRANSIT_POE"
+    ipaddr: ""
+    subnet: ""
+    enable: "1"
+    bridge: "BRIDGE0"
+  - device: "vlan0.4000.1"
+    descr: "SYNC"
+    ipaddr: "10.40.0.1"
+    subnet: "24"
+    enable: "1"
+  - device: "vlan0.10.2"
+    descr: "MGMT"
+    ipaddr: "10.10.0.1"
+    subnet: "24"
+    enable: "1"
+  - device: "vlan0.20.2"
+    descr: "IOT"
+    ipaddr: "10.20.0.1"
+    subnet: "24"
+    enable: "1"
+  - device: "vlan0.30.2"
+    descr: "DMZ"
+    ipaddr: "10.30.0.1"
+    subnet: "24"
+    enable: "1"
+  - device: "vlan0.100.2"
+    descr: "CLIENTS"
+    ipaddr: "10.100.0.1"
+    subnet: "24"
+    enable: "1"
 
-# opn_dhcp — disable the default Dnsmasq DHCP before enabling Kea (they conflict
-# on the same interfaces).
-# DISABLED here so opn_dhcp makes no change until you reach the DHCP step; zone
-# DHCP itself is also gated by network_phase (off at coexist). Flip true when
-# bringing up Kea zone DHCP (migrating phase onward).
-# Flip -> run: ansible-playbook site.yml --tags dhcp --check --diff
-opnsense_enforce_dnsmasq_disabled: false
+# opn_dhcp — Dnsmasq disabled, Kea active. Raw sockets, fw_rules=false.
+opnsense_enforce_dnsmasq_disabled: true
 
-# opn_ha — CARP VIPs, hasync config, peer sync trigger.
-# DISABLED: HA needs the dedicated SYNC zone and a second node. Enable only when
-# the HA peer is present and the SYNC segment is up.
-# Flip -> run: ansible-playbook site.yml --tags ha --check --diff
+# opn_ha — disabled. SYNC zone exists (vlan0.4000.1, 10.40.0.1/24) but no peer.
 opnsense_ha_enabled: false
 opnsense_carp_vhid_base: 1
 
-# opn_edge_decommission — require zero active leases on the cluster segment
-# before withdrawing legacy edge service. KEPT ON: this is a SAFETY gate, not a
-# capability — it prevents stranding devices. Leave true; the decommission role
-# only runs at network_phase=converged anyway.
+# opn_edge_decommission — evidence gate. Blocks withdrawal of bridge0 DHCP
+# until active leases = 0. Only runs at network_phase=converged.
 opnsense_require_zero_leases: true
 
 # =============================================================================
 # Sysctl tunables
 # =============================================================================
+# forwarding (v4+v6) is OPNsense default=1, not configured.
 opnsense_tunables:
-  net.inet.ip.forwarding: "1"
-  net.inet6.ip6.forwarding: "1"
+  net.inet.carp.senderr_demotion_factor: "240"
+  net.inet.carp.log: "2"
+  net.link.bridge.pfil_local_phys: "0"
+  net.link.bridge.pfil_bridge: "1"
+  net.link.bridge.pfil_member: "0"
+
+# =============================================================================
+# SSH user for tasks that require filesystem access (home.arpa nodefault)
+# =============================================================================
+opnsense_dns_ssh_user: "barbie"
 
 # =============================================================================
 # netspec overrides (deep-merged over shared/netspec/zones.yml; set only deviations)
 # =============================================================================
-netspec_overrides: {}
+netspec_overrides:
+  zones:
+    cluster:
+      dhcp: true
+      dhcp_pool: "10.0.0.100 - 10.0.0.200"

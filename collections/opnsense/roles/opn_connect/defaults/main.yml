@@ -5,6 +5,8 @@ opnsense_api_key: "{{ lookup('env', 'OPNSENSE_API_KEY') | default('', true) }}"
 opnsense_api_secret: "{{ lookup('env', 'OPNSENSE_API_SECRET') | default('', true) }}"
 opnsense_api_port: "{{ lookup('env', 'OPNSENSE_API_PORT') | default(443, true) }}"
 opnsense_ssl_verify: "{{ lookup('env', 'OPNSENSE_SSL_VERIFY') | default(false, true) | bool }}"
+opnsense_api_timeout: 30
+opnsense_api_retries: 2
 
 # Connection arguments for raw/uri tasks (outside the module_defaults action group)
 opnsense_api_args:

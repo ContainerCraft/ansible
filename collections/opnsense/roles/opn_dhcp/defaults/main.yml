@@ -18,9 +18,38 @@ opnsense_managed_tag: "{{ lookup('env', 'OPNSENSE_MANAGED_TAG') | default('ansib
 
 # --- DHCP ---
 opnsense_enforce_dnsmasq_disabled: "{{ lookup('env', 'OPNSENSE_ENFORCE_DNSMASQ_DISABLED') | default(false, true) | bool }}"
+opnsense_dhcp_socket_type: "raw"
+
+# --- Kea general hardening (set via raw API; fields in OPNsense model) ---
+opnsense_dhcp_general_hardening:
+  service_sockets_max_retries: "5"
+  service_sockets_retry_wait_time: "5000"
+
+# --- Per-subnet settings (set via raw API after oxlorg creates the subnet) ---
+# allocator: random prevents predictable address assignment
+# match-client-id: "0" for IoT (unstable client IDs), "1" for others
+# valid_lifetime: per-zone lease duration in seconds
+opnsense_dhcp_subnet_overrides:
+  mgmt:
+    allocator: "random"
+    match-client-id: "1"
+    valid_lifetime: "7200"
+  iot:
+    allocator: "random"
+    match-client-id: "0"
+    valid_lifetime: "3600"
+  dmz:
+    allocator: "random"
+    match-client-id: "1"
+    valid_lifetime: "3600"
+  clients:
+    allocator: "random"
+    match-client-id: "1"
+    valid_lifetime: "7200"
 
 # --- Data fallback ---
 netspec:
+  cluster_domain: "home.arpa"
   zones: {}
 phase:
   zone_dhcp: false

@@ -22,6 +22,7 @@ opnsense_wan_block_private: "{{ lookup('env', 'OPNSENSE_WAN_BLOCK_PRIVATE') | de
 opnsense_wan_block_bogons: "{{ lookup('env', 'OPNSENSE_WAN_BLOCK_BOGONS') | default(true, true) | bool }}"
 
 # --- Sysctl tunables ---
+# forwarding (v4+v6) is OPNsense default=1, not configured here.
 opnsense_tunables:
-  net.inet.ip.forwarding: "1"
-  net.inet6.ip6.forwarding: "1"
+  net.inet.carp.senderr_demotion_factor: "240"
+  net.inet.carp.log: "2"

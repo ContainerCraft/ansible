@@ -16,12 +16,17 @@ opnsense_api_args:
 opnsense_reload: false
 opnsense_managed_tag: "{{ lookup('env', 'OPNSENSE_MANAGED_TAG') | default('ansible-managed', true) }}"
 
+# --- HA state policy ---
+opnsense_ha_enabled: false
+
 # --- Data fallback ---
 netspec:
   wan_interface: "wan"
   zones: {}
   cluster_dns: ""
 firewall_matrix:
-  wan_egress: []
+  deny_all: []
+  dhcp_allow: []
   isolation: []
   allows: []
+  wan_egress: []

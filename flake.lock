@@ -191,11 +191,11 @@
         "systems": "systems_2"
       },
       "locked": {
-        "lastModified": 1782668757,
-        "narHash": "sha256-Nt4TaRobCIHYpXjwWu4cIWaMeWeuzL+ZoBdMo0RezCw=",
+        "lastModified": 1782709511,
+        "narHash": "sha256-xt14FecPN/Ut7CXXp48oYWoWHcx8UaEs9hyWTilfnhg=",
         "owner": "braincraftio",
         "repo": "konductor",
-        "rev": "8a473d3e4a27f68a73e24b1daa9c4454f893aa27",
+        "rev": "c37358af7b3d8cb5b978abc726aa7121a18e74d1",
         "type": "github"
       },
       "original": {

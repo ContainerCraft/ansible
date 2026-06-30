@@ -1,17 +1,161 @@
 ---
-# Unbound resolver and split-horizon forwarding.
+# Unbound resolver: general settings, hardening, cache, ACL default, ACLs,
+# DNSBL, local-zone nodefault, split-horizon forwarding, and static host
+# reservations.
 #
-# Kea does not register DHCP leases in Unbound dynamically; only static
-# reservations resolve. register_dhcp_static_mappings enables static-mapping
-# registration. unbound_forward is matched on (domain, target).
+# register_dhcp_static_mappings: true — Kea static reservations sync to
+# Unbound on service restart. Dynamic Kea leases are NOT registered (ISC
+# DHCP only). register_dhcp_leases: false because it reads dhcpd.leases
+# which Kea does not write.
+#
+# dhcp_domain: set to the cluster domain so DHCP-registered hostnames
+# resolve under home.arpa (not bare hostnames).
 
 - name: Enable Unbound resolver
   oxlorg.opnsense.unbound_general:
     enabled: true
     port: 53
-    dnssec: true
-    register_dhcp_static_mappings: true
+    dnssec: "{{ opnsense_dns_dnssec }}"
+    dns64: "{{ opnsense_dns_dns64 }}"
+    dns64_prefix: "{{ opnsense_dns_dns64_prefix }}"
+    register_dhcp_static_mappings: "{{ opnsense_dns_register_dhcp_static_mappings }}"
+    register_dhcp_leases: "{{ opnsense_dns_register_dhcp_leases }}"
+    dhcp_domain: "{{ netspec.cluster_domain }}"
     reload: false
+
+# Hardening, privacy, rebinding protection, DNSSEC insecure domain,
+# observability, and cache sizing. All fields map to unbound.advanced.*
+# in the OPNsense Unbound model (Unbound.xml). The template at
+# OPNsense/Unbound/core/advanced.conf reads these fields and generates
+# the corresponding unbound.conf directives on reconfigure.
+- name: Apply Unbound hardening, cache, and security settings
+  oxlorg.opnsense.raw:
+    module: unbound
+    controller: settings
+    command: set
+    action: post
+    data:
+      unbound:
+        advanced: "{{ opnsense_dns_hardening | combine(opnsense_dns_cache) }}"
+    firewall: "{{ opnsense_api_args.firewall }}"
+    api_key: "{{ opnsense_api_args.api_key }}"
+    api_secret: "{{ opnsense_api_args.api_secret }}"
+    api_port: "{{ opnsense_api_args.api_port }}"
+    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
+
+# Set ACL default action to refuse. The model default is allow.
+- name: Set Unbound ACL default action
+  oxlorg.opnsense.raw:
+    module: unbound
+    controller: settings
+    command: set
+    action: post
+    data:
+      unbound:
+        acls:
+          default_action: "{{ opnsense_dns_acl_default_action }}"
+    firewall: "{{ opnsense_api_args.firewall }}"
+    api_key: "{{ opnsense_api_args.api_key }}"
+    api_secret: "{{ opnsense_api_args.api_secret }}"
+    api_port: "{{ opnsense_api_args.api_port }}"
+    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
+
+# Per-zone ACLs
+- name: Configure Unbound ACLs per zone
+  oxlorg.opnsense.unbound_acl:
+    name: "{{ item.name }}"
+    action: "{{ item.action }}"
+    networks: "{{ item.networks }}"
+    description: "{{ item.description }}"
+    state: present
+    reload: false
+  loop: "{{ opnsense_dns_acls }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+# DNSBL threat intelligence feeds — each blocklist entry is managed
+# individually via addDnsbl/searchDnsbl. The model requires description
+# on every entry and the bulk set endpoint validates ALL existing entries.
+- name: Search existing DNSBL blocklist entries
+  oxlorg.opnsense.raw:
+    module: unbound
+    controller: settings
+    command: searchDnsbl
+    action: get
+    firewall: "{{ opnsense_api_args.firewall }}"
+    api_key: "{{ opnsense_api_args.api_key }}"
+    api_secret: "{{ opnsense_api_args.api_secret }}"
+    api_port: "{{ opnsense_api_args.api_port }}"
+    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
+  register: opn_dns_dnsbl_existing
+
+- name: Create DNSBL blocklist entries
+  oxlorg.opnsense.raw:
+    module: unbound
+    controller: settings
+    command: addDnsbl
+    action: post
+    data:
+      blocklist:
+        enabled: "{{ item.enabled }}"
+        type: "{{ item.type }}"
+        description: "{{ item.description }}"
+    firewall: "{{ opnsense_api_args.firewall }}"
+    api_key: "{{ opnsense_api_args.api_key }}"
+    api_secret: "{{ opnsense_api_args.api_secret }}"
+    api_port: "{{ opnsense_api_args.api_port }}"
+    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
+  loop: "{{ opnsense_dns_dnsbl }}"
+  loop_control:
+    label: "{{ item.description }}"
+  when: item.description not in (opn_dns_dnsbl_existing.response.rows | default([]) | map(attribute='description') | list)
+
+# Override the built-in home.arpa static local zone (RFC 8375). Without
+# this, queries for *.home.arpa return NXDOMAIN from the built-in zone
+# and never reach the forward zone.
+#
+# The OPNsense MVC model has no per-domain local-zone override field.
+# The supported mechanism is a persistent drop-in .conf file in
+# /usr/local/etc/unbound.opnsense.d/ (documented in the OPNsense manual
+# under Unbound → Advanced Configurations). start.sh copies these into
+# /var/unbound/etc/ on every restart. Files placed directly in
+# /var/unbound/etc/ are wiped on restart and do not persist.
+#
+# This task requires SSH access to the firewall (same as bootstrap).
+# The file is NOT synced via XMLRPC HA sync — when HA is enabled, a
+# second task must copy it to the backup node.
+- name: Write home.arpa nodefault local-zone override
+  ansible.builtin.raw: |
+    TARGET="/usr/local/etc/unbound.opnsense.d/home-arpa-nodefault.conf"
+    CONTENT='server:
+      local-zone: "home.arpa." nodefault'
+    if [ -f "$TARGET" ] && echo "$CONTENT" | diff -q "$TARGET" - >/dev/null 2>&1; then
+      echo "UNCHANGED"
+    else
+      echo "$CONTENT" > "$TARGET"
+      chmod 644 "$TARGET"
+      echo "WRITTEN"
+    fi
+  delegate_to: "{{ opnsense_api_args.firewall }}"
+  vars:
+    ansible_connection: ssh
+    ansible_user: "{{ hostvars[inventory_hostname].opnsense_dns_ssh_user }}"
+    ansible_ssh_common_args: "-o StrictHostKeyChecking=accept-new"
+    ansible_become: true
+  register: opn_dns_nodefault_result
+  changed_when: "'WRITTEN' in opn_dns_nodefault_result.stdout"
+
+- name: Validate Unbound configuration
+  ansible.builtin.raw: configctl unbound check
+  delegate_to: "{{ opnsense_api_args.firewall }}"
+  vars:
+    ansible_connection: ssh
+    ansible_user: "{{ hostvars[inventory_hostname].opnsense_dns_ssh_user }}"
+    ansible_ssh_common_args: "-o StrictHostKeyChecking=accept-new"
+    ansible_become: true
+  register: opn_dns_check_result
+  changed_when: false
+  failed_when: opn_dns_check_result.rc != 0
 
 - name: Forward internal zone to cluster CoreDNS
   oxlorg.opnsense.unbound_forward:
@@ -23,16 +167,6 @@
     enabled: true
     reload: false
 
-# Static host reservations. Kea does not register leases in Unbound, so hosts
-# that must resolve by name are declared here as static overrides. Driven by
-# netspec.static_hosts (default empty): each entry has hostname, domain, value
-# (IP), and optional record_type (default A; choices A/AAAA/MX).
-#
-# unbound_host idempotency is a COMPOSITE key — its real default match_fields is
-# [hostname, domain, record_type, value, prio], not description. description is a
-# mutable field, not the key. match_fields is set explicitly (dropping prio,
-# which is MX-only and forced to None for A/AAAA) so re-runs match on the
-# host+record identity and an IP change is detected as a change, not a new entry.
 - name: Create static host reservations
   oxlorg.opnsense.unbound_host:
     hostname: "{{ item.hostname }}"
@@ -47,7 +181,29 @@
   loop_control:
     label: "{{ item.hostname }}.{{ item.domain | default(netspec.cluster_domain) }} -> {{ item.value }}"
 
-- name: Apply Unbound changes
+# Reconfigure when no drop-in file changed (soft reload, no DNS outage).
+- name: Reconfigure Unbound (soft reload)
   oxlorg.opnsense.reload:
     target: "unbound"
-  when: not ansible_check_mode
+  when:
+    - not ansible_check_mode
+    - not (opn_dns_nodefault_result.changed | default(false))
+
+# Full stop+start when the drop-in file changed — start.sh copies files
+# from /usr/local/etc/unbound.opnsense.d/ into /var/unbound/etc/.
+# reconfigureGeneral does not run start.sh and misses drop-in files.
+- name: Stop Unbound (drop-in file changed)
+  oxlorg.opnsense.service:
+    name: "unbound"
+    action: "stop"
+  when:
+    - not ansible_check_mode
+    - opn_dns_nodefault_result.changed | default(false)
+
+- name: Start Unbound (drop-in file changed)
+  oxlorg.opnsense.service:
+    name: "unbound"
+    action: "start"
+  when:
+    - not ansible_check_mode
+    - opn_dns_nodefault_result.changed | default(false)

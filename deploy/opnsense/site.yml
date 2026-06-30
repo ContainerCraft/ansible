@@ -20,6 +20,8 @@
       api_secret: "{{ opnsense_api_secret }}"
       api_port: "{{ opnsense_api_port }}"
       ssl_verify: "{{ opnsense_ssl_verify }}"
+      api_timeout: "{{ opnsense_api_timeout | default(30) }}"
+      api_retries: "{{ opnsense_api_retries | default(2) }}"
 
   pre_tasks:
     # Required, committed data files: netspec structure, phase map, firewall

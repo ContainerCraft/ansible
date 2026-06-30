@@ -15,15 +15,3 @@
     status_code: [200]
   when: not ansible_check_mode
 
-- name: Configure initial setup
-  oxlorg.opnsense.raw:
-    module: core
-    controller: initialsetup
-    command: configure
-    action: post
-    firewall: "{{ opnsense_api_args.firewall }}"
-    api_key: "{{ opnsense_api_args.api_key }}"
-    api_secret: "{{ opnsense_api_args.api_secret }}"
-    api_port: "{{ opnsense_api_args.api_port }}"
-    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
-  when: not ansible_check_mode

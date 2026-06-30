@@ -16,6 +16,87 @@ opnsense_api_args:
 opnsense_reload: false
 opnsense_managed_tag: "{{ lookup('env', 'OPNSENSE_MANAGED_TAG') | default('ansible-managed', true) }}"
 
+# --- Unbound general (exposed by oxlorg unbound_general module) ---
+opnsense_dns_dnssec: true
+opnsense_dns_dns64: false
+opnsense_dns_dns64_prefix: "64:ff9b::/96"
+opnsense_dns_register_dhcp_static_mappings: true
+opnsense_dns_register_dhcp_leases: false
+
+# --- Unbound hardening (all fields map to unbound.advanced.* in OPNsense API) ---
+# Field names match the OPNsense Unbound model (Unbound.xml) exactly.
+# Posted via raw API because the oxlorg unbound_general module only manages
+# unbound.general.* fields.
+#
+# Fields NOT in the OPNsense model (cannot be set via API):
+#   use-caps-for-id, deny-any, ip-ratelimit, ratelimit, answer-cookie,
+#   local-zone per-domain nodefault
+#
+# privateaddress replaces the model default when set — must include the
+# full list (model default is RFC 1918 + test-net + documentation ranges).
+opnsense_dns_hardening:
+  hideidentity: "1"
+  hideversion: "1"
+  prefetch: "1"
+  prefetchkey: "1"
+  dnssecstripped: "1"
+  belownxdomain: "1"
+  aggressivensec: "1"
+  qnameminstrict: "0"
+  privatedomain: "home.arpa"
+  privateaddress: "0.0.0.0/8,10.0.0.0/8,100.64.0.0/10,169.254.0.0/16,172.16.0.0/12,192.0.2.0/24,192.168.0.0/16,198.18.0.0/15,198.51.100.0/24,203.0.113.0/24,233.252.0.0/24,::1/128,2001:db8::/32,fc00::/8,fd00::/8,fe80::/10"
+  insecuredomain: "home.arpa"
+  unwantedreplythreshold: "10000000"
+  logservfail: "1"
+  valloglevel: "1"
+  extendedstatistics: "1"
+
+# --- Unbound ACL default action ---
+opnsense_dns_acl_default_action: "refuse"
+
+# --- Unbound ACLs (per zone subnet) ---
+opnsense_dns_acls:
+  - name: mgmt
+    action: allow
+    networks: ["10.10.0.0/24"]
+    description: "{{ opnsense_managed_tag }} mgmt zone"
+  - name: iot
+    action: allow
+    networks: ["10.20.0.0/24"]
+    description: "{{ opnsense_managed_tag }} iot zone"
+  - name: dmz
+    action: allow
+    networks: ["10.30.0.0/24"]
+    description: "{{ opnsense_managed_tag }} dmz zone"
+  - name: cluster
+    action: allow
+    networks: ["10.0.0.0/24"]
+    description: "{{ opnsense_managed_tag }} cluster zone"
+  - name: clients
+    action: allow
+    networks: ["10.100.0.0/24"]
+    description: "{{ opnsense_managed_tag }} clients zone"
+
+# --- Unbound DNSBL (threat intelligence) ---
+opnsense_dns_dnsbl:
+  - description: "ansible-managed ThreatFox IOC"
+    enabled: "1"
+    type: "atf"
+  - description: "ansible-managed Hagezi Threat Intelligence"
+    enabled: "1"
+    type: "hgz011"
+
+# --- Unbound cache sizing (bare metal with significant RAM) ---
+opnsense_dns_cache:
+  msgcachesize: "256m"
+  rrsetcachesize: "512m"
+  outgoingrange: "8192"
+  numqueriesperthread: "4096"
+  infracachenumhosts: "20000"
+
+# --- SSH user for config file write (home.arpa nodefault override) ---
+opnsense_dns_ssh_user: "{{ lookup('env', 'OPNSENSE_SSH_USER') | default('root', true) }}"
+
 # --- DNS data fallback ---
 netspec:
   cluster_domain: "home.arpa"

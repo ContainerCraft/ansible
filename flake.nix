@@ -37,6 +37,13 @@
           cp -r ${opnsenseSrc}/. $out/ansible_collections/oxlorg/opnsense/
         '';
 
+        # Python with httpx for Ansible module execution.
+        # toPythonApplication seals httpx inside ansible-core's wrapper process.
+        # Ansible modules run as separate Python subprocesses via interpreter
+        # discovery, which finds a bare Python without httpx. This derivation
+        # puts a python3 with httpx on PATH so discovery finds it.
+        pythonWithHttpx = pkgs.python3.withPackages (ps: [ ps.httpx ]);
+
         collectionsHook = ''
           # Ansible writes to ~/.ansible; ensure a writable HOME for ephemeral shells.
           if [ ! -w "$HOME" ]; then
@@ -47,14 +54,18 @@
           # Hermetic resolution: do not scan sys.path; fail on engine/collection mismatch.
           export ANSIBLE_COLLECTIONS_SCAN_SYS_PATH=false
           export ANSIBLE_COLLECTIONS_ON_ANSIBLE_VERSION_MISMATCH=error
+          # Pin module interpreter to the devshell python3 (has httpx).
+          # Prevents Ansible discovery from finding a bare nix-store Python.
+          export ANSIBLE_PYTHON_INTERPRETER="$(command -v python3)"
         '';
       in
       {
         packages.collection = opnsenseCollection;
 
         # Inherit konductor's full toolchain (ansible engine + wrapped linters),
-        # then layer the vendored collection and hermetic env on top.
+        # then layer pythonWithHttpx, the vendored collection, and hermetic env.
         devShells.default = konductor.devShells.${system}.full.overrideAttrs (old: {
+          buildInputs = (old.buildInputs or [ ]) ++ [ pythonWithHttpx ];
           shellHook = (old.shellHook or "") + "\n" + collectionsHook;
         });
       }
