@@ -1,0 +1,34 @@
+---
+# PXE/netboot.xyz — TFTP server + Kea DHCP options + subnet configuration.
+# Enables network booting on specified subnets with architecture-aware
+# boot file selection (BIOS/UEFI x86_64/UEFI ARM64).
+
+- name: Include TFTP server setup and boot file download
+  ansible.builtin.include_tasks: tftp.yml
+  when: opnsense_pxe_enabled | bool
+
+- name: Include Kea DHCP option creation for PXE
+  ansible.builtin.include_tasks: options.yml
+  when: opnsense_pxe_enabled | bool
+
+- name: Include subnet PXE configuration
+  ansible.builtin.include_tasks: subnets.yml
+  when: opnsense_pxe_enabled | bool
+
+- name: Include DNS views for per-subnet boot resolution
+  ansible.builtin.include_tasks: dns_views.yml
+  when:
+    - opnsense_pxe_enabled | bool
+    - opnsense_pxe_subnets | default([]) | length > 0
+
+- name: Include boot asset downloads (ISOs, kernels)
+  ansible.builtin.include_tasks: assets.yml
+  when:
+    - opnsense_pxe_enabled | bool
+    - opnsense_pxe_assets | default([]) | length > 0
+
+- name: Include iPXE menu generation and kernel extraction
+  ansible.builtin.include_tasks: menu.yml
+  when:
+    - opnsense_pxe_enabled | bool
+    - opnsense_pxe_assets | default([]) | length > 0

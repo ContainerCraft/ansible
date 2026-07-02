@@ -1,0 +1,11 @@
+---
+# Traffic management — bandwidth limits, download/upload caps.
+
+- name: Configure proxy traffic management
+  oxlorg.opnsense.webproxy_traffic:
+    enabled: "{{ opnsense_proxy_traffic_enabled }}"
+    download_kb_max: "{{ opnsense_proxy_traffic_download_kb_max }}"
+    upload_kb_max: "{{ opnsense_proxy_traffic_upload_kb_max }}"
+    throttle_kb_bandwidth: "{{ opnsense_proxy_traffic_throttle_kb }}"
+    throttle_kb_host_bandwidth: "{{ opnsense_proxy_traffic_throttle_kb_host }}"
+    reload: false

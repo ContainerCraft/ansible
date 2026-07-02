@@ -1,0 +1,38 @@
+---
+# Cache — disk and memory sizing, package caching.
+# The cache enable toggle is NOT in the OXL webproxy_cache module's
+# FIELDS_CHANGE — it must be set via raw API separately.
+
+- name: Enable local cache
+  oxlorg.opnsense.raw:
+    module: proxy
+    controller: settings
+    command: set
+    action: post
+    data:
+      proxy:
+        general:
+          cache:
+            local:
+              enabled: "{{ '1' if opnsense_proxy_cache_enabled else '0' }}"
+    firewall: "{{ opnsense_api_args.firewall }}"
+    api_key: "{{ opnsense_api_args.api_key }}"
+    api_secret: "{{ opnsense_api_args.api_secret }}"
+    api_port: "{{ opnsense_api_args.api_port }}"
+    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
+
+- name: Configure cache sizing and behavior
+  oxlorg.opnsense.webproxy_cache:
+    size_mb: "{{ opnsense_proxy_cache_size_mb }}"
+    memory_mb: "{{ opnsense_proxy_cache_memory_mb }}"
+    size_mb_max: "{{ opnsense_proxy_cache_max_object_mb }}"
+    memory_kb_max: "{{ opnsense_proxy_cache_max_memory_kb }}"
+    memory_cache_mode: "{{ opnsense_proxy_cache_mode }}"
+    directory: "{{ opnsense_proxy_cache_directory }}"
+    slot_size: "{{ opnsense_proxy_cache_slot_size }}"
+    swap_timeout: "{{ opnsense_proxy_cache_swap_timeout }}"
+    max_swap_rate: "{{ opnsense_proxy_cache_max_swap_rate }}"
+    cache_linux_packages: "{{ opnsense_proxy_cache_linux_packages }}"
+    cache_windows_updates: "{{ opnsense_proxy_cache_windows_updates }}"
+    reload: false
+  when: opnsense_proxy_cache_enabled | bool

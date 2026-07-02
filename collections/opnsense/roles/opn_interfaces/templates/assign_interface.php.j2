@@ -5,6 +5,9 @@
  * update the IP if it differs; if not assigned, find the next available
  * opt slot and create the entry.
  *
+ * Validates config.xml with xmllint after every save to prevent corrupt
+ * configs from persisting. Fails loudly if validation fails.
+ *
  * Arguments (from Jinja2 template):
  *   $device  — VLAN device name (e.g. vlan0.10.2)
  *   $descr   — interface description (e.g. MGMT)
@@ -22,6 +25,27 @@ $descr = "{{ item.descr | regex_replace('[^a-zA-Z0-9._-]', '') }}";
 $ipaddr = "{{ item.ipaddr }}";
 $subnet = "{{ item.subnet }}";
 $enable = "{{ item.enable | default('1') }}";
+
+/* Validate config.xml after save — fail loudly on corruption */
+function validate_config() {
+    $rc = 0;
+    exec('xmllint --noout /conf/config.xml 2>&1', $output, $rc);
+    if ($rc !== 0) {
+        fwrite(STDERR, "FATAL: config.xml failed xmllint validation after save\n");
+        foreach ($output as $line) {
+            fwrite(STDERR, "  $line\n");
+        }
+        /* Restore from most recent backup */
+        $backups = glob('/conf/backup/config-*.xml');
+        if (!empty($backups)) {
+            rsort($backups);
+            copy($backups[0], '/conf/config.xml');
+            fwrite(STDERR, "RESTORED: {$backups[0]} -> /conf/config.xml\n");
+        }
+        echo "OPN_IFACE_STATUS=error\n";
+        exit(1);
+    }
+}
 
 Config::getInstance()->lock();
 $config = Config::getInstance()->object();
@@ -56,12 +80,10 @@ if ($existing_ident !== null) {
     $node->subnet = $subnet;
     $node->descr = $descr;
     $node->enable = $enable;
-    if (empty((string)$node->spoofmac)) {
-        $node->addChild('spoofmac', '');
-    }
 
     Config::getInstance()->save();
     Config::getInstance()->unlock();
+    validate_config();
 
     echo "OPN_IFACE_STATUS=updated\n";
     echo "OPN_IFACE_IDENT=$existing_ident\n";
@@ -86,6 +108,7 @@ $node->addChild('spoofmac', '');
 
 Config::getInstance()->save();
 Config::getInstance()->unlock();
+validate_config();
 
 echo "OPN_IFACE_STATUS=created\n";
 echo "OPN_IFACE_IDENT=$ident\n";

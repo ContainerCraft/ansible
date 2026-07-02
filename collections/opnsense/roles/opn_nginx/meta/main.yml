@@ -1,0 +1,8 @@
+---
+galaxy_info:
+  role_name: opn_nginx
+  author: ContainerCraft
+  description: OPNsense edge automation - Nginx web server, file hosting, reverse proxy
+  license: GPL-2.0-or-later
+  min_ansible_version: "2.14"
+dependencies: []

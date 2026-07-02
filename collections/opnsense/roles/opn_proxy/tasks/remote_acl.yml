@@ -1,0 +1,32 @@
+---
+# Remote ACLs — URL-based blocklists fetched and applied to Squid.
+
+- name: Configure remote ACL blocklists
+  oxlorg.opnsense.webproxy_remote_acl:
+    file: "{{ item.file }}"
+    url: "{{ item.url }}"
+    username: "{{ item.username | default(omit) }}"
+    password: "{{ item.password | default(omit) }}"
+    categories: "{{ item.categories | default([]) }}"
+    verify_ssl: "{{ item.verify_ssl | default(true) }}"
+    description: "{{ item.description | default(opnsense_managed_tag ~ ' ' ~ item.file) }}"
+    state: present
+    reload: false
+  loop: "{{ opnsense_proxy_remote_acls | default([]) }}"
+  loop_control:
+    label: "{{ item.file }}"
+
+- name: Download and apply remote ACLs
+  oxlorg.opnsense.raw:
+    module: proxy
+    controller: service
+    command: downloadacls
+    action: post
+    firewall: "{{ opnsense_api_args.firewall }}"
+    api_key: "{{ opnsense_api_args.api_key }}"
+    api_secret: "{{ opnsense_api_args.api_secret }}"
+    api_port: "{{ opnsense_api_args.api_port }}"
+    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
+  when:
+    - opnsense_proxy_remote_acls | default([]) | length > 0
+    - not ansible_check_mode

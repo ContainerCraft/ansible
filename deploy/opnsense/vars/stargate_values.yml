@@ -6,12 +6,12 @@
 # =============================================================================
 #
 # OPNsense (stargate, i5-8500, 4x Intel em NIC):
-#   re0          WAN        73.48.181.18/23 (DHCP from ISP)
-#   bridge0      LAN        10.0.0.1/24    (em0 + em3 + vlan0.1.2)
-#   vlan0.10.2   MGMT       10.10.0.1/24
-#   vlan0.20.2   IOT        10.20.0.1/24
-#   vlan0.30.2   DMZ        10.30.0.1/24
-#   vlan0.100.2  CLIENTS    10.100.0.1/24
+#   re0          WAN        (DHCP from ISP)
+#   bridge0         LAN        10.0.0.1/24    (em0 + em3 + vlan0.1.2)
+#   bridge_mgmt     MGMT       10.10.0.1/24   (vlan0.10.1 + vlan0.10.2)
+#   bridge_iot      IOT        10.20.0.1/24   (vlan0.20.1 + vlan0.20.2)
+#   bridge_dmz      DMZ        10.30.0.1/24   (vlan0.30.1 + vlan0.30.2)
+#   bridge_clients  CLIENTS    10.100.0.1/24  (vlan0.100.1 + vlan0.100.2)
 #   vlan0.4000.1 SYNC       10.40.0.1/24
 #   vlan0.1.1    TRANSIT    (no IP, qnap trunk)
 #   vlan0.1.2    TRANSIT_POE(no IP, bridge0 member, poe trunk)
@@ -100,15 +100,31 @@ opnsense_api_key: "{{ lookup('env', 'OPNSENSE_API_KEY') | default('', true) }}"
 opnsense_api_secret: "{{ lookup('env', 'OPNSENSE_API_SECRET') | default('', true) }}"
 opnsense_api_port: "{{ lookup('env', 'OPNSENSE_API_PORT') | default(443, true) }}"
 opnsense_ssl_verify: "{{ lookup('env', 'OPNSENSE_SSL_VERIFY') | default(false, true) | bool }}"
-opnsense_api_timeout: 30
+opnsense_api_timeout: 120
 opnsense_api_retries: 2
 
 # =============================================================================
 # Capability toggles
 # =============================================================================
 
+# opn_system — packages required on the firewall.
+opnsense_packages:
+  - "os-vnstat"
+  - "os-mdns-repeater"
+  - "os-lldpd"
+  - "os-wol"
+  - "os-acme-client"
+  - "os-telegraf"
+  - "os-upnp"
+  - "os-squid"
+  - "os-clamav"
+  - "os-c-icap"
+  - "os-nginx"
+
 # opn_system — hostname/domain/timezone + WAN via initialsetup wizard.
-opnsense_apply_identity: true
+# Disabled after initial configuration — wizard always reports changed and
+# disrupts WAN during reconfigure. Enable only for deliberate identity changes.
+opnsense_apply_identity: false
 opnsense_hostname: "stargate"
 opnsense_domain: "home.arpa"
 opnsense_timezone: "America/Los_Angeles"
@@ -116,18 +132,21 @@ opnsense_wan_ipv4_type: "dhcp"
 opnsense_wan_block_private: true
 opnsense_wan_block_bogons: true
 
-# opn_interfaces — bridge0 members: opt4 (em0), opt3 (em3). opt1 (vlan0.1.2)
-# added dynamically by the bridge collection task after interface assignment.
+# opn_interfaces — prepare trunk ports removes em1/em2 from bridge0 before
+# VLAN sub-interfaces are created on them. Required on clean/restored deploys
+# where all 4 NICs are bridged. Uses reload: false to defer bridge reconfigure.
 opnsense_prepare_trunk_ports: true
 opnsense_bridge_description: "BRIDGE0"
 opnsense_bridge_keep_members: ["opt4", "opt3"]
 
 # opn_interfaces — VLAN device assignment + IP via SSH + config.xml.
-# Gateway IPs on em2 sub-interfaces (NETGEAR/AP). em1 sub-interfaces have no
-# gateway IPs — em1 VLANs exist for trunk symmetry, not for routing.
+# Per-zone bridges aggregate em1 (QNAP) and em2 (NETGEAR) VLAN sub-interfaces.
+# Gateway IPs on bridges, not on individual VLAN sub-interfaces.
+# Bridge members have no IP — same pattern as bridge0 with em0 + em3 + vlan0.1.2.
 opnsense_assign_interfaces: true
-opnsense_interfaces_ssh_user: "barbie"
+opnsense_interfaces_ssh_user: "root"
 opnsense_interface_assignments:
+  # --- VLAN 1: transit (no IP, bridge0 members) ---
   - device: "vlan0.1.1"
     descr: "TRANSIT"
     ipaddr: ""
@@ -139,31 +158,90 @@ opnsense_interface_assignments:
     subnet: ""
     enable: "1"
     bridge: "BRIDGE0"
+  # --- VLAN 4000: sync (single trunk, no bridge needed) ---
   - device: "vlan0.4000.1"
     descr: "SYNC"
     ipaddr: "10.40.0.1"
     subnet: "24"
     enable: "1"
+  # --- VLAN 10: mgmt (bridge members, no IP) ---
+  - device: "vlan0.10.1"
+    descr: "MGMT_QNAP"
+    ipaddr: ""
+    subnet: ""
+    enable: "1"
+    bridge: "BRIDGE_MGMT"
   - device: "vlan0.10.2"
-    descr: "MGMT"
+    descr: "MGMT_POE"
+    ipaddr: ""
+    subnet: ""
+    enable: "1"
+    bridge: "BRIDGE_MGMT"
+  # --- VLAN 20: iot (bridge members, no IP) ---
+  - device: "vlan0.20.1"
+    descr: "IOT_QNAP"
+    ipaddr: ""
+    subnet: ""
+    enable: "1"
+    bridge: "BRIDGE_IOT"
+  - device: "vlan0.20.2"
+    descr: "IOT_POE"
+    ipaddr: ""
+    subnet: ""
+    enable: "1"
+    bridge: "BRIDGE_IOT"
+  # --- VLAN 30: dmz (bridge members, no IP) ---
+  - device: "vlan0.30.1"
+    descr: "DMZ_QNAP"
+    ipaddr: ""
+    subnet: ""
+    enable: "1"
+    bridge: "BRIDGE_DMZ"
+  - device: "vlan0.30.2"
+    descr: "DMZ_POE"
+    ipaddr: ""
+    subnet: ""
+    enable: "1"
+    bridge: "BRIDGE_DMZ"
+  # --- VLAN 100: clients (bridge members, no IP) ---
+  - device: "vlan0.100.1"
+    descr: "CLIENTS_QNAP"
+    ipaddr: ""
+    subnet: ""
+    enable: "1"
+    bridge: "BRIDGE_CLIENTS"
+  - device: "vlan0.100.2"
+    descr: "CLIENTS_POE"
+    ipaddr: ""
+    subnet: ""
+    enable: "1"
+    bridge: "BRIDGE_CLIENTS"
+
+# Per-zone bridges — created after VLAN sub-interfaces are assigned.
+# Each bridge gets the gateway IP and the zone description that firewall/DHCP
+# resolve against. Kea and firewall rules target these bridges by description.
+opnsense_zone_bridges:
+  - description: "BRIDGE_MGMT"
     ipaddr: "10.10.0.1"
     subnet: "24"
-    enable: "1"
-  - device: "vlan0.20.2"
-    descr: "IOT"
+    descr: "MGMT"
+  - description: "BRIDGE_IOT"
     ipaddr: "10.20.0.1"
     subnet: "24"
-    enable: "1"
-  - device: "vlan0.30.2"
-    descr: "DMZ"
+    descr: "IOT"
+  - description: "BRIDGE_DMZ"
     ipaddr: "10.30.0.1"
     subnet: "24"
-    enable: "1"
-  - device: "vlan0.100.2"
-    descr: "CLIENTS"
+    descr: "DMZ"
+  - description: "BRIDGE_CLIENTS"
     ipaddr: "10.100.0.1"
     subnet: "24"
-    enable: "1"
+    descr: "CLIENTS"
+# Bridge0 is NOT in opnsense_zone_bridges because it already exists as the
+# LAN interface with its IP (10.0.0.1/24) set by OPNsense initial setup.
+# Its membership is managed by the bridge update task — BRIDGE0's keep_members
+# (opt4/opt3) are prepended, and dynamic members (opt1/vlan0.1.2) are collected
+# from interface_assignments entries with bridge: "BRIDGE0".
 
 # opn_dhcp — Dnsmasq disabled, Kea active. Raw sockets, fw_rules=false.
 opnsense_enforce_dnsmasq_disabled: true
@@ -190,7 +268,7 @@ opnsense_tunables:
 # =============================================================================
 # SSH user for tasks that require filesystem access (home.arpa nodefault)
 # =============================================================================
-opnsense_dns_ssh_user: "barbie"
+opnsense_dns_ssh_user: "root"
 
 # =============================================================================
 # netspec overrides (deep-merged over shared/netspec/zones.yml; set only deviations)
@@ -200,3 +278,248 @@ netspec_overrides:
     cluster:
       dhcp: true
       dhcp_pool: "10.0.0.100 - 10.0.0.200"
+
+  # Unified host inventory — single source of truth for DNS and DHCP.
+  # Every entry creates a DNS A record (hostname.domain → ip).
+  # Entries with mac + subnet also create a Kea DHCP reservation.
+  # Optional aliases field adds additional DNS names for the same IP.
+  hosts:
+    # OPNsense gateway (DNS only, no DHCP — it IS the DHCP server)
+    - hostname: "stargate"
+      ip: "10.0.0.1"
+      subnet: "10.0.0.0/24"
+      description: "OPNsense edge router"
+    # PXE/iPXE HTTP boot server — Nginx on port 8080.
+    # Global fallback record. Per-subnet resolution via Unbound views
+    # in /usr/local/etc/unbound.opnsense.d/pxe-views.conf
+    - hostname: "boot"
+      ip: "10.0.0.1"
+      subnet: "10.0.0.0/24"
+      description: "PXE HTTP boot server (fallback)"
+    # Switches
+    - hostname: "qnap"
+      ip: "10.0.0.21"
+      subnet: "10.0.0.0/24"
+      description: "QNAP QSW-M408S managed switch"
+      aliases:
+        - hostname: "qsw-m408s"
+          domain: "qnap.home.arpa"
+    - hostname: "netgear"
+      ip: "10.0.0.22"
+      mac: "34:98:b5:ac:e3:0c"
+      subnet: "10.0.0.0/24"
+      static_arp: true
+      description: "NETGEAR GS305EP PoE switch"
+      aliases:
+        - hostname: "gs305ep"
+          domain: "netgear.home.arpa"
+    # WiFi access points
+    - hostname: "ap"
+      ip: "10.0.0.23"
+      mac: "74:83:c2:14:af:99"
+      subnet: "10.0.0.0/24"
+      static_arp: true
+      description: "UniFi UAP-AC-HD access point"
+      aliases:
+        - hostname: "uap-ac-hd"
+          domain: "unifi.home.arpa"
+    - hostname: "orbi"
+      ip: "10.0.0.24"
+      mac: "6c:cd:d6:e6:44:62"
+      subnet: "10.0.0.0/24"
+      static_arp: true
+      description: "NETGEAR Orbi RBR750 legacy WiFi"
+      aliases:
+        - hostname: "rbr750"
+          domain: "orbi.home.arpa"
+    # Talos cluster (optiplexprime)
+    - hostname: "op1"
+      ip: "10.0.0.33"
+      mac: "fc:34:97:1e:79:d4"
+      subnet: "10.0.0.0/24"
+      static_arp: true
+      wol: true
+      description: "Talos op1 10G SFP"
+    - hostname: "op2"
+      ip: "10.0.0.34"
+      mac: "fc:34:97:1e:79:d1"
+      subnet: "10.0.0.0/24"
+      static_arp: true
+      wol: true
+      description: "Talos op2 10G SFP"
+    - hostname: "op3"
+      ip: "10.0.0.35"
+      mac: "fc:34:97:1e:79:d2"
+      subnet: "10.0.0.0/24"
+      static_arp: true
+      wol: true
+      description: "Talos op3 10G SFP"
+    - hostname: "coredns"
+      ip: "10.0.0.51"
+      subnet: "10.0.0.0/24"
+      description: "CoreDNS Cilium L2 VIP"
+    # Workstations
+    - hostname: "mithril"
+      ip: "10.10.0.184"
+      mac: "cc:48:3a:77:f2:20"
+      subnet: "10.10.0.0/24"
+      static_arp: true
+      wol: true
+      description: "mithril wired NIC"
+    - hostname: "sting"
+      ip: "10.100.0.10"
+      mac: "6c:6a:77:43:d0:a5"
+      subnet: "10.100.0.0/24"
+      description: "sting WiFi"
+    - hostname: "pocket"
+      ip: "10.100.0.11"
+      mac: "22:0e:df:17:a7:fe"
+      subnet: "10.100.0.0/24"
+      description: "Pixel pocket"
+    - hostname: "leviathan"
+      ip: "10.100.0.12"
+      mac: "00:2b:67:1d:f0:29"
+      subnet: "10.100.0.0/24"
+      description: "laptop hosting uwuntu VM"
+    - hostname: "uwuntu"
+      ip: "10.100.0.160"
+      mac: "00:0c:29:6d:91:60"
+      subnet: "10.100.0.0/24"
+      description: "VMware uwuntu VM"
+
+# =============================================================================
+# User and RBAC management
+# =============================================================================
+# Groups containing the API user cannot be managed via the API — OPNsense
+# blocks self-lockout. The admins group (barbie's group) is managed via
+# bootstrap and the web UI only.
+opnsense_groups: []
+
+opnsense_users:
+  - name: "barbie"
+    description: "Admin operator"
+    shell: "/bin/csh"
+    membership: ["admins"]
+    update_password: "on_create"
+
+# =============================================================================
+# IDS — Suricata intrusion detection (discovery mode)
+# =============================================================================
+# =============================================================================
+# Caching Proxy (Squid) — transparent HTTP caching
+# =============================================================================
+# Disabled until os-squid is installed (requires system upgrade first).
+# After upgrade: set opnsense_proxy_enabled: true and run --tags proxy.
+opnsense_proxy_enabled: true
+opnsense_proxy_mode: "transparent"
+opnsense_proxy_hostname: "stargate.home.arpa"
+opnsense_proxy_email: "admin@home.arpa"
+# Transparent proxy on CLIENTS, IOT, DMZ.
+# MGMT removed after successful evaluation.
+# LAN (cluster) excluded — Talos nodes manage their own HTTP.
+opnsense_proxy_interfaces: ["opt19", "opt17", "opt18"]
+
+# 200GB disk cache — aggressive caching for container images, ISOs, packages.
+# 3GB max object — container layers, golang/npm/python packages, OS images.
+# 1GB RAM cache — keep hot objects in memory for instant re-serve.
+# 16MB max RAM object — npm tarballs, small packages stay in RAM.
+opnsense_proxy_cache_size_mb: 204800
+opnsense_proxy_cache_memory_mb: 8192
+opnsense_proxy_cache_max_object_mb: 3072
+opnsense_proxy_cache_max_memory_kb: 16384
+opnsense_proxy_cache_linux_packages: true
+opnsense_proxy_cache_windows_updates: true
+
+# ClamAV + C-ICAP — scan all HTTP downloads for malware.
+# max_scan_size and max_file_size must accommodate large cached objects.
+opnsense_proxy_icap_enabled: true
+opnsense_proxy_clamav_max_scan_size: "3G"
+opnsense_proxy_clamav_max_file_size: "3G"
+opnsense_proxy_clamav_block_macros: true
+opnsense_proxy_clamav_block_encrypted_archives: true
+
+# =============================================================================
+# Nginx — HTTP file server for PXE boot, ISOs, and future reverse proxy
+# =============================================================================
+opnsense_nginx_enabled: true
+opnsense_nginx_servers:
+  - servername: "boot.home.arpa"
+    listen_http: "8080"
+    root: "/usr/local/tftp"
+    disable_bot_protection: true
+    sendfile: true
+    locations:
+      - description: "PXE boot assets and ISOs"
+        urlpattern: "/"
+        root: "/usr/local/tftp"
+        autoindex: true
+
+# =============================================================================
+# PXE / netboot.xyz — network booting on all DHCP-enabled subnets
+# =============================================================================
+opnsense_pxe_enabled: true
+opnsense_pxe_tftp_listen: "0.0.0.0"
+opnsense_pxe_assets:
+  # netboot.xyz assets are downloaded separately via opnsense_pxe_netbootxyz_files
+  # --- Ubuntu 24.04.4 LTS (Noble Numbat) ---
+  - url: "https://releases.ubuntu.com/24.04.4/ubuntu-24.04.4-desktop-amd64.iso"
+    dest: "assets/ubuntu/24.04/desktop/ubuntu-24.04.4-desktop-amd64.iso"
+    checksum: "sha256:3a4c9877b483ab46d7c3fbe165a0db275e1ae3cfe56a5657e5a47c2f99a99d1e"
+  - url: "https://releases.ubuntu.com/24.04.4/ubuntu-24.04.4-live-server-amd64.iso"
+    dest: "assets/ubuntu/24.04/server/ubuntu-24.04.4-live-server-amd64.iso"
+    checksum: "sha256:e907d92eeec9df64163a7e454cbc8d7755e8ddc7ed42f99dbc80c40f1a138433"
+  - url: "https://cdimage.ubuntu.com/lubuntu/releases/24.04.4/release/lubuntu-24.04.4-desktop-amd64.iso"
+    dest: "assets/ubuntu/24.04/lubuntu/lubuntu-24.04.4-desktop-amd64.iso"
+    checksum: "sha256:5ca3ab769f1538fec7c7d8a5af2e73d3f06ea22f979f6560a9cc4acaf042a5fa"
+  # --- Ubuntu 26.04 LTS (Resolute Raccoon) ---
+  - url: "https://releases.ubuntu.com/26.04/ubuntu-26.04-desktop-amd64.iso"
+    dest: "assets/ubuntu/26.04/desktop/ubuntu-26.04-desktop-amd64.iso"
+    checksum: "sha256:487f87faaf547ea30e0aba4d5b53346292571256b25333a978db1692bcee9dd2"
+  - url: "https://releases.ubuntu.com/26.04/ubuntu-26.04-live-server-amd64.iso"
+    dest: "assets/ubuntu/26.04/server/ubuntu-26.04-live-server-amd64.iso"
+    checksum: "sha256:dec49008a71f6098d0bcfc822021f4d042d5f2db279e4d75bdd981304f1ca5d9"
+  - url: "https://cdimage.ubuntu.com/lubuntu/releases/26.04/release/lubuntu-26.04-desktop-amd64.iso"
+    dest: "assets/ubuntu/26.04/lubuntu/lubuntu-26.04-desktop-amd64.iso"
+    checksum: "sha256:a9eef9e75c139caa428d11799f681e2d29e6ba7e22aa045d9a64599d45cd12ff"
+  # --- Fedora 44 ---
+  - url: "https://dl.fedoraproject.org/pub/fedora/linux/releases/44/Workstation/x86_64/iso/Fedora-Workstation-Live-44-1.7.x86_64.iso"
+    dest: "assets/fedora/44/workstation/Fedora-Workstation-Live-44-1.7.x86_64.iso"
+    checksum: "sha256:1620295f6a00c27c3208f0c00b8ece4eab1ec69b9002152d97488bf26a426ddf"
+  - url: "https://dl.fedoraproject.org/pub/fedora/linux/releases/44/Server/x86_64/iso/Fedora-Server-netinst-x86_64-44-1.7.iso"
+    dest: "assets/fedora/44/server/Fedora-Server-netinst-x86_64-44-1.7.iso"
+    checksum: "sha256:ae20c06bea746913cadea7d80463e13f4bf55bee4df2918111c921c674b70283"
+  - url: "https://dl.fedoraproject.org/pub/fedora/linux/releases/44/Spins/x86_64/iso/Fedora-LXDE-Live-44-1.7.x86_64.iso"
+    dest: "assets/fedora/44/lxde/Fedora-LXDE-Live-44-1.7.x86_64.iso"
+    checksum: "sha256:b30d73a6f687790cd4b43c8910db99d5c93f557d45b91306b356d633f77a1c4a"
+opnsense_pxe_subnets:
+  - "mgmt"
+  - "clients"
+  - "dmz"
+
+# =============================================================================
+# Plugin services
+# =============================================================================
+# mDNS repeater — proxy multicast DNS between zone bridges.
+# Max 5 interfaces. Enables Chromecast/AirPlay/printer discovery across VLANs.
+opnsense_mdns_enabled: true
+opnsense_mdns_interfaces: ["lan", "opt16", "opt17", "opt19"]
+
+# LLDP — neighbor discovery across all interfaces.
+opnsense_lldpd_enabled: true
+
+# Wake-on-LAN — remote wake for wired infrastructure.
+# Hosts with wol: true in the unified inventory are registered.
+opnsense_wol_enabled: true
+
+# Telegraf — metrics collection. Prometheus client endpoint on :9273.
+# Scrape from cluster Prometheus when deployed.
+opnsense_telegraf_enabled: true
+
+# IDS disabled — OXL ids_general module incompatible with OPNsense 26.1
+# (API changed 'ips' boolean to 'mode' select field). Needs upstream fix
+# or local module patch before enabling.
+opnsense_ids_enabled: false
+opnsense_ids_interfaces: ["lan", "opt16", "opt17", "opt18", "opt19"]
+opnsense_ids_block: false
+opnsense_ids_promiscuous: true
+opnsense_ids_syslog_alerts: true

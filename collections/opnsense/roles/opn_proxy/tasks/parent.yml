@@ -1,0 +1,14 @@
+---
+# Parent proxy — upstream proxy chaining for multi-tier deployments.
+
+- name: Configure parent proxy
+  oxlorg.opnsense.webproxy_parent:
+    enabled: "{{ opnsense_proxy_parent_enabled }}"
+    host: "{{ opnsense_proxy_parent_host }}"
+    port: "{{ opnsense_proxy_parent_port }}"
+    auth: "{{ opnsense_proxy_parent_auth }}"
+    user: "{{ opnsense_proxy_parent_user }}"
+    password: "{{ opnsense_proxy_parent_password }}"
+    local_domains: "{{ opnsense_proxy_parent_local_domains }}"
+    local_ips: "{{ opnsense_proxy_parent_local_ips }}"
+    reload: false

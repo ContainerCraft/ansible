@@ -1,0 +1,67 @@
+---
+# Squid caching proxy — orchestrator.
+# Includes sub-task files by concern, gated by enable toggles.
+# All module tasks use reload: false. A single reconfigure at the
+# end applies all changes atomically.
+
+- name: Include proxy general settings
+  ansible.builtin.include_tasks: general.yml
+  when: opnsense_proxy_enabled | bool
+
+- name: Include proxy forward settings
+  ansible.builtin.include_tasks: forward.yml
+  when: opnsense_proxy_enabled | bool
+
+- name: Include proxy cache settings
+  ansible.builtin.include_tasks: cache.yml
+  when: opnsense_proxy_enabled | bool
+
+- name: Include proxy ACL settings
+  ansible.builtin.include_tasks: acl.yml
+  when: opnsense_proxy_enabled | bool
+
+- name: Include proxy traffic management
+  ansible.builtin.include_tasks: traffic.yml
+  when: opnsense_proxy_enabled | bool
+
+- name: Include proxy authentication
+  ansible.builtin.include_tasks: auth.yml
+  when:
+    - opnsense_proxy_enabled | bool
+    - opnsense_proxy_mode not in ['transparent', 'intercept']
+    - opnsense_proxy_auth_method | default('') | length > 0
+
+- name: Include proxy ICAP settings
+  ansible.builtin.include_tasks: icap.yml
+  when:
+    - opnsense_proxy_enabled | bool
+    - opnsense_proxy_icap_enabled | bool
+
+- name: Include proxy parent settings
+  ansible.builtin.include_tasks: parent.yml
+  when:
+    - opnsense_proxy_enabled | bool
+    - opnsense_proxy_parent_enabled | bool
+
+- name: Include proxy remote ACLs
+  ansible.builtin.include_tasks: remote_acl.yml
+  when: opnsense_proxy_enabled | bool
+
+- name: Include proxy PAC auto-configuration
+  ansible.builtin.include_tasks: pac.yml
+  when:
+    - opnsense_proxy_enabled | bool
+    - opnsense_proxy_pac_proxies | default([]) | length > 0
+
+- name: Apply all proxy configuration changes
+  oxlorg.opnsense.reload:
+    target: "webproxy"
+  when:
+    - opnsense_proxy_enabled | bool
+    - not ansible_check_mode
+
+- name: Include transparent mode NAT documentation
+  ansible.builtin.include_tasks: nat.yml
+  when:
+    - opnsense_proxy_enabled | bool
+    - opnsense_proxy_mode in ['transparent', 'intercept']

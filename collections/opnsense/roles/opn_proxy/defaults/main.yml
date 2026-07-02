@@ -1,0 +1,184 @@
+---
+# =============================================================================
+# Caching Proxy (Squid) — opn_proxy role
+# =============================================================================
+# Two deployment modes controlled by opnsense_proxy_mode:
+#   "transparent" — intercept HTTP without client config (no MITM, no HTTPS inspection)
+#   "intercept"   — transparent + SSL inspection via CA cert (MITM, full HTTPS visibility)
+#
+# transparent mode caches HTTP, logs HTTP, passes HTTPS unmodified.
+# intercept mode caches HTTP+HTTPS, logs full URLs, requires client CA trust.
+#
+# A third implicit mode "explicit" is when transparent is off — clients must
+# configure proxy settings manually or via PAC/WPAD.
+
+# --- Connection ---
+opnsense_firewall_address: "{{ lookup('env', 'OPNSENSE_FIREWALL') | default('', true) }}"
+opnsense_api_key: "{{ lookup('env', 'OPNSENSE_API_KEY') | default('', true) }}"
+opnsense_api_secret: "{{ lookup('env', 'OPNSENSE_API_SECRET') | default('', true) }}"
+opnsense_api_port: "{{ lookup('env', 'OPNSENSE_API_PORT') | default(443, true) }}"
+opnsense_ssl_verify: "{{ lookup('env', 'OPNSENSE_SSL_VERIFY') | default(false, true) | bool }}"
+opnsense_api_args:
+  firewall: "{{ opnsense_firewall_address }}"
+  api_key: "{{ opnsense_api_key }}"
+  api_secret: "{{ opnsense_api_secret }}"
+  api_port: "{{ opnsense_api_port }}"
+  ssl_verify: "{{ opnsense_ssl_verify }}"
+
+# --- Apply discipline ---
+opnsense_managed_tag: "{{ lookup('env', 'OPNSENSE_MANAGED_TAG') | default('ansible-managed', true) }}"
+
+# --- Master toggle ---
+opnsense_proxy_enabled: false
+opnsense_proxy_mode: "transparent"
+
+# --- General (webproxy_general) ---
+opnsense_proxy_hostname: ""
+opnsense_proxy_email: "admin@localhost.local"
+opnsense_proxy_suppress_version: true
+opnsense_proxy_forwarded_for: "truncate"
+opnsense_proxy_uri_whitespace: "strip"
+opnsense_proxy_error_pages: "opnsense"
+opnsense_proxy_log: true
+opnsense_proxy_log_store: true
+opnsense_proxy_log_target: "file"
+opnsense_proxy_log_ignore: []
+opnsense_proxy_dns_servers: []
+opnsense_proxy_pinger: true
+
+# --- Forward proxy (webproxy_forward) ---
+opnsense_proxy_interfaces: []
+opnsense_proxy_port: 3128
+opnsense_proxy_port_ssl: 3129
+opnsense_proxy_allow_interface_subnets: true
+opnsense_proxy_ftp_interfaces: []
+opnsense_proxy_ftp_port: 2121
+opnsense_proxy_ftp_transparent: false
+opnsense_proxy_snmp_enabled: false
+opnsense_proxy_snmp_port: 3401
+opnsense_proxy_snmp_password: "public"
+
+# --- SSL/MITM inspection (intercept mode only) ---
+opnsense_proxy_ssl_ca: ""
+opnsense_proxy_ssl_exclude: []
+opnsense_proxy_ssl_sni_only: false
+opnsense_proxy_ssl_cache_mb: 4
+opnsense_proxy_ssl_workers: 5
+
+# --- Cache (webproxy_cache + raw enable) ---
+opnsense_proxy_cache_enabled: true
+opnsense_proxy_cache_size_mb: 51200
+opnsense_proxy_cache_memory_mb: 512
+opnsense_proxy_cache_max_object_mb: 256
+opnsense_proxy_cache_max_memory_kb: 4096
+opnsense_proxy_cache_mode: "network"
+opnsense_proxy_cache_directory: "/var/squid/cache"
+opnsense_proxy_cache_slot_size: 16384
+opnsense_proxy_cache_swap_timeout: 0
+opnsense_proxy_cache_max_swap_rate: 0
+opnsense_proxy_cache_linux_packages: true
+opnsense_proxy_cache_windows_updates: true
+
+# --- ACL (webproxy_acl) ---
+opnsense_proxy_acl_allow: []
+opnsense_proxy_acl_exclude: []
+opnsense_proxy_acl_banned: []
+opnsense_proxy_acl_whitelist_domains: []
+opnsense_proxy_acl_blacklist_domains: []
+opnsense_proxy_acl_block_user_agents: []
+opnsense_proxy_acl_block_mime_types: []
+opnsense_proxy_acl_youtube_filter: ""
+opnsense_proxy_acl_ports_tcp:
+  - "80:http"
+  - "21:ftp"
+  - "443:https"
+  - "70:gopher"
+  - "210:wais"
+  - "1025-65535:unregistered ports"
+  - "280:http-mgmt"
+  - "488:gss-http"
+  - "591:filemaker"
+  - "777:multiling http"
+opnsense_proxy_acl_ports_ssl:
+  - "443:https"
+
+# --- Traffic management (webproxy_traffic) ---
+opnsense_proxy_traffic_enabled: false
+opnsense_proxy_traffic_download_kb_max: ""
+opnsense_proxy_traffic_upload_kb_max: ""
+opnsense_proxy_traffic_throttle_kb: ""
+opnsense_proxy_traffic_throttle_kb_host: ""
+
+# --- Authentication (webproxy_auth) ---
+opnsense_proxy_auth_method: ""
+opnsense_proxy_auth_group: ""
+opnsense_proxy_auth_prompt: "OPNsense proxy authentication"
+opnsense_proxy_auth_ttl_h: 2
+opnsense_proxy_auth_processes: 5
+
+# --- ICAP antivirus (ClamAV + C-ICAP + webproxy_icap) ---
+# When enabled, configures the full chain: ClamAV engine → C-ICAP server → Squid ICAP client.
+# Requires os-clamav and os-c-icap packages installed.
+opnsense_proxy_icap_enabled: false
+
+# Squid ICAP client settings
+opnsense_proxy_icap_request_url: "icap://[::1]:1344/avscan"
+opnsense_proxy_icap_response_url: "icap://[::1]:1344/avscan"
+opnsense_proxy_icap_ttl: 60
+opnsense_proxy_icap_send_client_ip: true
+opnsense_proxy_icap_send_username: false
+opnsense_proxy_icap_encode_username: false
+opnsense_proxy_icap_header_username: "X-Username"
+opnsense_proxy_icap_preview: true
+opnsense_proxy_icap_preview_size: 1024
+opnsense_proxy_icap_exclude: []
+
+# ClamAV engine settings
+opnsense_proxy_clamav_maxthreads: "10"
+opnsense_proxy_clamav_maxqueue: "100"
+opnsense_proxy_clamav_idletimeout: "30"
+opnsense_proxy_clamav_block_macros: true
+opnsense_proxy_clamav_block_encrypted_archives: true
+opnsense_proxy_clamav_max_scan_size: "100M"
+opnsense_proxy_clamav_max_file_size: "25M"
+opnsense_proxy_clamav_max_recursion: "16"
+opnsense_proxy_clamav_max_files: "10000"
+opnsense_proxy_clamav_mirror: "database.clamav.net"
+
+# C-ICAP server settings
+opnsense_proxy_cicap_timeout: "300"
+opnsense_proxy_cicap_max_keepalive: "100"
+opnsense_proxy_cicap_keepalive_timeout: "600"
+opnsense_proxy_cicap_start_servers: "3"
+opnsense_proxy_cicap_max_servers: "10"
+opnsense_proxy_cicap_min_spare_threads: "10"
+opnsense_proxy_cicap_max_spare_threads: "20"
+opnsense_proxy_cicap_threads_per_child: "10"
+opnsense_proxy_cicap_listen: "::1"
+opnsense_proxy_cicap_send_percent: "5"
+opnsense_proxy_cicap_send_after: "2M"
+opnsense_proxy_cicap_pass_on_error: false
+opnsense_proxy_cicap_max_object_size: "5M"
+
+# --- Parent proxy (webproxy_parent) ---
+opnsense_proxy_parent_enabled: false
+opnsense_proxy_parent_host: ""
+opnsense_proxy_parent_port: 3128
+opnsense_proxy_parent_auth: false
+opnsense_proxy_parent_user: ""
+opnsense_proxy_parent_password: ""
+opnsense_proxy_parent_local_domains: []
+opnsense_proxy_parent_local_ips: []
+
+# --- Remote ACLs (webproxy_remote_acl, CRUD) ---
+opnsense_proxy_remote_acls: []
+
+# --- PAC auto-configuration (webproxy_pac_*, CRUD) ---
+opnsense_proxy_pac_proxies: []
+opnsense_proxy_pac_matches: []
+opnsense_proxy_pac_rules: []
+
+# --- NAT redirect interfaces for transparent mode ---
+# OPNsense interface identifiers whose HTTP traffic gets redirected to the proxy.
+# Derived from opnsense_proxy_interfaces if not set.
+opnsense_proxy_nat_interfaces: []

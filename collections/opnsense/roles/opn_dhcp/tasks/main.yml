@@ -71,10 +71,11 @@
     interfaces: "{{ opn_dhcp_zone_interfaces.values() | list }}"
     fw_rules: false
     socket_type: "{{ opnsense_dhcp_socket_type }}"
+    lifetime: "{{ opnsense_dhcp_default_lifetime }}"
     reload: false
   when: phase.zone_dhcp | bool
 
-- name: Apply Kea general hardening (socket retries)
+- name: Apply Kea general hardening (socket retries, decline probation)
   oxlorg.opnsense.raw:
     module: kea
     controller: dhcpv4
@@ -82,7 +83,8 @@
     action: post
     data:
       dhcpv4:
-        general: "{{ opnsense_dhcp_general_hardening }}"
+        general: "{{ opnsense_dhcp_general_hardening | combine({'decline_probation_period': opnsense_dhcp_decline_probation_period}) }}"
+        lexpire: "{{ opnsense_dhcp_lease_expiration }}"
     firewall: "{{ opnsense_api_args.firewall }}"
     api_key: "{{ opnsense_api_args.api_key }}"
     api_secret: "{{ opnsense_api_args.api_secret }}"
@@ -99,6 +101,11 @@
     gateway: ["{{ item.value.gateway }}"]
     dns: ["{{ item.value.gateway }}"]
     domain: "{{ netspec.cluster_domain | default('home.arpa') }}"
+    domain_search: ["{{ netspec.cluster_domain | default('home.arpa') }}"]
+    ntp_servers: ["{{ item.value.gateway }}"]
+    next_server: "{{ item.value.pxe_next_server | default('') }}"
+    tftp_server: "{{ item.value.pxe_tftp_server | default('') }}"
+    tftp_file: "{{ item.value.pxe_tftp_file | default('') }}"
     match_fields: ["subnet"]
     state: present
     reload: false
@@ -158,6 +165,49 @@
     - item.value.subnet is defined
     - item.key in opnsense_dhcp_subnet_overrides
     - _subnet_uuid != 'MISSING'
+
+- name: Create Kea DHCP reservations from unified inventory
+  oxlorg.opnsense.dhcp_reservation:
+    ip: "{{ item.ip }}"
+    mac: "{{ item.mac }}"
+    hostname: "{{ item.hostname | default(omit) }}"
+    subnet: "{{ item.subnet }}"
+    description: "{{ opnsense_managed_tag }} {{ item.description | default(item.hostname) }}"
+    state: present
+    reload: false
+  loop: "{{ netspec.hosts | default([]) | selectattr('mac', 'defined') | list }}"
+  loop_control:
+    label: "{{ item.ip }} {{ item.mac }} {{ item.hostname | default('') }}"
+  when: phase.zone_dhcp | bool
+
+- name: Create static ARP entries for wired infrastructure devices
+  oxlorg.opnsense.neighbor:
+    description: "{{ opnsense_managed_tag }} {{ item.hostname }}"
+    ethernet_address: "{{ item.mac }}"
+    ip_address: "{{ item.ip }}"
+    state: present
+    reload: false
+  loop: "{{ netspec.hosts | default([]) | selectattr('mac', 'defined') | selectattr('static_arp', 'defined') | selectattr('static_arp') | list }}"
+  loop_control:
+    label: "{{ item.ip }} {{ item.mac }} {{ item.hostname }}"
+  when: phase.zone_dhcp | bool
+  register: opn_dhcp_neighbor_result
+
+- name: Apply static ARP changes
+  oxlorg.opnsense.raw:
+    module: interfaces
+    controller: neighbor_settings
+    command: reconfigure
+    action: post
+    firewall: "{{ opnsense_api_args.firewall }}"
+    api_key: "{{ opnsense_api_args.api_key }}"
+    api_secret: "{{ opnsense_api_args.api_secret }}"
+    api_port: "{{ opnsense_api_args.api_port }}"
+    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
+  when:
+    - phase.zone_dhcp | bool
+    - not ansible_check_mode
+    - opn_dhcp_neighbor_result.changed | default(false)
 
 - name: Apply Kea DHCP changes
   oxlorg.opnsense.reload:

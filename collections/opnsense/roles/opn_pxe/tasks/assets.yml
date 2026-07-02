@@ -1,0 +1,66 @@
+---
+# Download and validate boot assets (ISOs, kernels, initramfs).
+# Assets are served by Nginx over HTTP for iPXE chainloading and
+# direct browser download. Directory structure under the TFTP root
+# is created from the dest path of each asset entry.
+
+- name: Create asset subdirectories
+  ansible.builtin.file:
+    path: "{{ opnsense_pxe_root }}/{{ item.dest | dirname }}"
+    state: directory
+    mode: "0755"
+  delegate_to: "{{ opnsense_api_args.firewall }}"
+  vars: &ssh_vars
+    ansible_connection: ssh
+    ansible_user: "root"
+    ansible_ssh_common_args: "-o StrictHostKeyChecking=accept-new"
+    ansible_python_interpreter: /usr/local/bin/python3
+  loop: "{{ opnsense_pxe_assets }}"
+  loop_control:
+    label: "{{ item.dest | dirname }}"
+  when:
+    - opnsense_pxe_assets | length > 0
+    - item.dest | dirname | length > 0
+
+- name: Download boot assets
+  ansible.builtin.get_url:
+    url: "{{ item.url }}"
+    dest: "{{ opnsense_pxe_root }}/{{ item.dest }}"
+    mode: "0644"
+    checksum: "{{ item.checksum if item.checksum | default('') | length > 0 else omit }}"
+    force: false
+    timeout: 600
+  delegate_to: "{{ opnsense_api_args.firewall }}"
+  vars: *ssh_vars
+  loop: "{{ opnsense_pxe_assets }}"
+  loop_control:
+    label: "{{ item.dest }} ({{ item.url | regex_replace('^.*/([^/]+)$', '\\1') }})"
+  register: opn_pxe_asset_downloads
+
+- name: Validate downloaded assets exist and are not empty
+  ansible.builtin.stat:
+    path: "{{ opnsense_pxe_root }}/{{ item.dest }}"
+  delegate_to: "{{ opnsense_api_args.firewall }}"
+  vars: *ssh_vars
+  loop: "{{ opnsense_pxe_assets }}"
+  loop_control:
+    label: "{{ item.dest }}"
+  register: opn_pxe_asset_stats
+
+- name: Assert all assets are present and valid
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+      - item.stat.size > 1000
+    fail_msg: "Asset {{ item.item.dest }} missing or invalid ({{ item.stat.size | default(0) }} bytes)"
+    quiet: true
+  loop: "{{ opn_pxe_asset_stats.results }}"
+  loop_control:
+    label: "{{ item.item.dest }} ({{ item.stat.size | default(0) | human_readable }})"
+
+- name: Report asset inventory
+  ansible.builtin.debug:
+    msg: >-
+      {{ opn_pxe_asset_stats.results | length }} assets,
+      {{ opn_pxe_asset_stats.results | map(attribute='stat.size') | map('int') | sum | human_readable }} total
+  when: opn_pxe_asset_stats.results | length > 0

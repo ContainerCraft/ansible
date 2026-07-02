@@ -19,6 +19,7 @@ opnsense_managed_tag: "{{ lookup('env', 'OPNSENSE_MANAGED_TAG') | default('ansib
 # --- DHCP ---
 opnsense_enforce_dnsmasq_disabled: "{{ lookup('env', 'OPNSENSE_ENFORCE_DNSMASQ_DISABLED') | default(false, true) | bool }}"
 opnsense_dhcp_socket_type: "raw"
+opnsense_dhcp_default_lifetime: 7200
 
 # --- Kea general hardening (set via raw API; fields in OPNsense model) ---
 opnsense_dhcp_general_hardening:
@@ -30,6 +31,10 @@ opnsense_dhcp_general_hardening:
 # match-client-id: "0" for IoT (unstable client IDs), "1" for others
 # valid_lifetime: per-zone lease duration in seconds
 opnsense_dhcp_subnet_overrides:
+  cluster:
+    allocator: "random"
+    match-client-id: "1"
+    valid_lifetime: "14400"
   mgmt:
     allocator: "random"
     match-client-id: "1"
@@ -46,6 +51,18 @@ opnsense_dhcp_subnet_overrides:
     allocator: "random"
     match-client-id: "1"
     valid_lifetime: "7200"
+
+# --- Kea lease expiration tuning (lexpire in OPNsense model) ---
+opnsense_dhcp_lease_expiration:
+  reclaim_timer_wait_time: "10"
+  flush_reclaimed_timer_wait_time: "25"
+  hold_reclaimed_time: "3600"
+  max_reclaim_leases: "100"
+  max_reclaim_time: "250"
+  unwarned_reclaim_cycles: "5"
+
+# --- Kea decline probation period (seconds) ---
+opnsense_dhcp_decline_probation_period: "86400"
 
 # --- Data fallback ---
 netspec:

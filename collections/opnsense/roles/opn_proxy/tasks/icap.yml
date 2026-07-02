@@ -1,0 +1,146 @@
+---
+# ICAP antivirus — ClamAV engine + C-ICAP server + Squid ICAP client.
+# Chain: HTTP traffic → Squid → C-ICAP (localhost:1344) → ClamAV scan → pass/block.
+# All three components must be configured and enabled.
+
+# --- ClamAV engine ---
+- name: Configure ClamAV engine
+  oxlorg.opnsense.raw:
+    module: clamav
+    controller: general
+    command: set
+    action: post
+    data:
+      general:
+        enabled: "1"
+        fc_enabled: "1"
+        enabletcp: "1"
+        maxthreads: "{{ opnsense_proxy_clamav_maxthreads }}"
+        maxqueue: "{{ opnsense_proxy_clamav_maxqueue }}"
+        idletimeout: "{{ opnsense_proxy_clamav_idletimeout }}"
+        scanpe: "1"
+        scanelf: "1"
+        detectbroken: "1"
+        scanole2: "1"
+        ole2blockmarcros: "{{ '1' if opnsense_proxy_clamav_block_macros else '0' }}"
+        scanpdf: "1"
+        scanswf: "1"
+        scanxmldocs: "1"
+        scanhwp3: "1"
+        scanmailfiles: "1"
+        scanhtml: "1"
+        scanarchive: "1"
+        arcblockenc: "{{ '1' if opnsense_proxy_clamav_block_encrypted_archives else '0' }}"
+        maxscansize: "{{ opnsense_proxy_clamav_max_scan_size }}"
+        maxfilesize: "{{ opnsense_proxy_clamav_max_file_size }}"
+        maxrecursion: "{{ opnsense_proxy_clamav_max_recursion }}"
+        maxfiles: "{{ opnsense_proxy_clamav_max_files }}"
+        fc_databasemirror: "{{ opnsense_proxy_clamav_mirror }}"
+    firewall: "{{ opnsense_api_args.firewall }}"
+    api_key: "{{ opnsense_api_args.api_key }}"
+    api_secret: "{{ opnsense_api_args.api_secret }}"
+    api_port: "{{ opnsense_api_args.api_port }}"
+    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
+
+- name: Apply ClamAV configuration
+  oxlorg.opnsense.raw:
+    module: clamav
+    controller: service
+    command: reconfigure
+    action: post
+    firewall: "{{ opnsense_api_args.firewall }}"
+    api_key: "{{ opnsense_api_args.api_key }}"
+    api_secret: "{{ opnsense_api_args.api_secret }}"
+    api_port: "{{ opnsense_api_args.api_port }}"
+    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
+  when: not ansible_check_mode
+
+- name: Download ClamAV signatures (freshclam)
+  oxlorg.opnsense.raw:
+    module: clamav
+    controller: service
+    command: freshclam
+    action: post
+    firewall: "{{ opnsense_api_args.firewall }}"
+    api_key: "{{ opnsense_api_args.api_key }}"
+    api_secret: "{{ opnsense_api_args.api_secret }}"
+    api_port: "{{ opnsense_api_args.api_port }}"
+    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
+  when: not ansible_check_mode
+
+# --- C-ICAP server ---
+- name: Configure C-ICAP server
+  oxlorg.opnsense.raw:
+    module: cicap
+    controller: general
+    command: set
+    action: post
+    data:
+      general:
+        enabled: "1"
+        timeout: "{{ opnsense_proxy_cicap_timeout }}"
+        maxkeepaliverequests: "{{ opnsense_proxy_cicap_max_keepalive }}"
+        keepalivetimeout: "{{ opnsense_proxy_cicap_keepalive_timeout }}"
+        startservers: "{{ opnsense_proxy_cicap_start_servers }}"
+        maxservers: "{{ opnsense_proxy_cicap_max_servers }}"
+        minsparethreads: "{{ opnsense_proxy_cicap_min_spare_threads }}"
+        maxsparethreads: "{{ opnsense_proxy_cicap_max_spare_threads }}"
+        threadsperchild: "{{ opnsense_proxy_cicap_threads_per_child }}"
+        listenaddress: "{{ opnsense_proxy_cicap_listen }}"
+        localSquid: "1"
+        enable_accesslog: "1"
+    firewall: "{{ opnsense_api_args.firewall }}"
+    api_key: "{{ opnsense_api_args.api_key }}"
+    api_secret: "{{ opnsense_api_args.api_secret }}"
+    api_port: "{{ opnsense_api_args.api_port }}"
+    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
+
+- name: Configure C-ICAP ClamAV integration
+  oxlorg.opnsense.raw:
+    module: cicap
+    controller: antivirus
+    command: set
+    action: post
+    data:
+      antivirus:
+        enable_clamav: "1"
+        scanfiletypes: "TEXT,DATA,EXECUTABLE,ARCHIVE,GIF,JPEG,MSOFFICE"
+        sendpercentdata: "{{ opnsense_proxy_cicap_send_percent }}"
+        startsendpercentdataafter: "{{ opnsense_proxy_cicap_send_after }}"
+        allow204responses: "1"
+        passonerror: "{{ '1' if opnsense_proxy_cicap_pass_on_error else '0' }}"
+        maxobjectsize: "{{ opnsense_proxy_cicap_max_object_size }}"
+    firewall: "{{ opnsense_api_args.firewall }}"
+    api_key: "{{ opnsense_api_args.api_key }}"
+    api_secret: "{{ opnsense_api_args.api_secret }}"
+    api_port: "{{ opnsense_api_args.api_port }}"
+    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
+
+- name: Apply C-ICAP configuration
+  oxlorg.opnsense.raw:
+    module: cicap
+    controller: service
+    command: reconfigure
+    action: post
+    firewall: "{{ opnsense_api_args.firewall }}"
+    api_key: "{{ opnsense_api_args.api_key }}"
+    api_secret: "{{ opnsense_api_args.api_secret }}"
+    api_port: "{{ opnsense_api_args.api_port }}"
+    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
+  when: not ansible_check_mode
+
+# --- Squid ICAP client settings ---
+- name: Configure Squid ICAP client
+  oxlorg.opnsense.webproxy_icap:
+    enabled: true
+    request_url: "{{ opnsense_proxy_icap_request_url }}"
+    response_url: "{{ opnsense_proxy_icap_response_url }}"
+    ttl: "{{ opnsense_proxy_icap_ttl }}"
+    send_client_ip: "{{ opnsense_proxy_icap_send_client_ip }}"
+    send_username: "{{ opnsense_proxy_icap_send_username }}"
+    encode_username: "{{ opnsense_proxy_icap_encode_username }}"
+    header_username: "{{ opnsense_proxy_icap_header_username }}"
+    preview: "{{ opnsense_proxy_icap_preview }}"
+    preview_size: "{{ opnsense_proxy_icap_preview_size }}"
+    exclude: "{{ opnsense_proxy_icap_exclude }}"
+    reload: false

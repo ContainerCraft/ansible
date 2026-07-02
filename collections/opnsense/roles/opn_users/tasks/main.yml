@@ -1,0 +1,44 @@
+---
+# User, group, and privilege management via OPNsense auth API.
+# Groups are created first so users can reference them via membership.
+# Privileges are applied last to bind users/groups to access policies.
+
+- name: Create groups
+  oxlorg.opnsense.group:
+    name: "{{ item.name }}"
+    description: "{{ item.description | default(opnsense_managed_tag ~ ' ' ~ item.name) }}"
+    member: "{{ item.member | default([]) }}"
+    privilege: "{{ item.privilege | default([]) }}"
+    source_net: "{{ item.source_net | default([]) }}"
+    state: present
+  loop: "{{ opnsense_groups | default([]) }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Create users
+  oxlorg.opnsense.user:
+    name: "{{ item.name }}"
+    description: "{{ item.description | default('') }}"
+    shell: "{{ item.shell | default('/bin/csh') }}"
+    membership: "{{ item.membership | default([]) }}"
+    authorized_keys: "{{ item.authorized_keys | default(omit) }}"
+    password: "{{ item.password | default(omit) }}"
+    update_password: "{{ item.update_password | default('on_create') }}"
+    scrambled_password: "{{ item.scrambled_password | default(omit) }}"
+    email: "{{ item.email | default(omit) }}"
+    comment: "{{ item.comment | default(omit) }}"
+    state: present
+  loop: "{{ opnsense_users | default([]) }}"
+  loop_control:
+    label: "{{ item.name }}"
+  no_log: "{{ item.password is defined }}"
+
+- name: Apply privilege assignments
+  oxlorg.opnsense.privilege:
+    id: "{{ item.id }}"
+    user: "{{ item.user | default([]) }}"
+    group: "{{ item.group | default([]) }}"
+    state: "{{ item.state | default('present') }}"
+  loop: "{{ opnsense_privileges | default([]) }}"
+  loop_control:
+    label: "{{ item.id }}"

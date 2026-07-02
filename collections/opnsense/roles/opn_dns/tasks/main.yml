@@ -20,14 +20,15 @@
     dns64_prefix: "{{ opnsense_dns_dns64_prefix }}"
     register_dhcp_static_mappings: "{{ opnsense_dns_register_dhcp_static_mappings }}"
     register_dhcp_leases: "{{ opnsense_dns_register_dhcp_leases }}"
+    register_system_records: "{{ not opnsense_dns_noregrecords }}"
     dhcp_domain: "{{ netspec.cluster_domain }}"
     reload: false
 
 # Hardening, privacy, rebinding protection, DNSSEC insecure domain,
-# observability, and cache sizing. All fields map to unbound.advanced.*
-# in the OPNsense Unbound model (Unbound.xml). The template at
-# OPNsense/Unbound/core/advanced.conf reads these fields and generates
-# the corresponding unbound.conf directives on reconfigure.
+# observability, cache sizing, and serve-expired resilience.
+# Raw API set always returns "saved" — changed_when is a known limitation
+# of oxlorg.opnsense.raw (no diff support). The fields ARE idempotent on
+# the OPNsense side — config.xml is only written when values differ.
 - name: Apply Unbound hardening, cache, and security settings
   oxlorg.opnsense.raw:
     module: unbound
@@ -43,7 +44,6 @@
     api_port: "{{ opnsense_api_args.api_port }}"
     ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
 
-# Set ACL default action to refuse. The model default is allow.
 - name: Set Unbound ACL default action
   oxlorg.opnsense.raw:
     module: unbound
@@ -73,42 +73,33 @@
   loop_control:
     label: "{{ item.name }}"
 
-# DNSBL threat intelligence feeds — each blocklist entry is managed
-# individually via addDnsbl/searchDnsbl. The model requires description
-# on every entry and the bulk set endpoint validates ALL existing entries.
-- name: Search existing DNSBL blocklist entries
-  oxlorg.opnsense.raw:
-    module: unbound
-    controller: settings
-    command: searchDnsbl
-    action: get
-    firewall: "{{ opnsense_api_args.firewall }}"
-    api_key: "{{ opnsense_api_args.api_key }}"
-    api_secret: "{{ opnsense_api_args.api_secret }}"
-    api_port: "{{ opnsense_api_args.api_port }}"
-    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
-  register: opn_dns_dnsbl_existing
-
-- name: Create DNSBL blocklist entries
-  oxlorg.opnsense.raw:
-    module: unbound
-    controller: settings
-    command: addDnsbl
-    action: post
-    data:
-      blocklist:
-        enabled: "{{ item.enabled }}"
-        type: "{{ item.type }}"
-        description: "{{ item.description }}"
-    firewall: "{{ opnsense_api_args.firewall }}"
-    api_key: "{{ opnsense_api_args.api_key }}"
-    api_secret: "{{ opnsense_api_args.api_secret }}"
-    api_port: "{{ opnsense_api_args.api_port }}"
-    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
+# DNSBL policies — idempotent via the unbound_dnsbl module. Each entry
+# is matched by name. Providers can be combined in a single policy.
+# source_networks scopes policies to specific subnets (empty = all).
+- name: Configure DNSBL policies
+  oxlorg.opnsense.unbound_dnsbl:
+    name: "{{ item.name }}"
+    providers: "{{ item.providers }}"
+    source_networks: "{{ item.source_networks | default([]) }}"
+    domains_allow: "{{ item.domains_allow | default([]) }}"
+    domains_block: "{{ item.domains_block | default([]) }}"
+    wildcard_domains_block: "{{ item.wildcard_domains_block | default([]) }}"
+    nxdomain: "{{ item.nxdomain | default(false) }}"
+    enabled: true
+    state: present
+    reload: true
   loop: "{{ opnsense_dns_dnsbl }}"
   loop_control:
-    label: "{{ item.description }}"
-  when: item.description not in (opn_dns_dnsbl_existing.response.rows | default([]) | map(attribute='description') | list)
+    label: "{{ item.name }}"
+
+- name: Create DNSBL update cron job (daily at 03:30)
+  oxlorg.opnsense.cron:
+    description: "{{ opnsense_managed_tag }} Update Unbound DNSBLs"
+    command: "unbound dnsbl"
+    minutes: "30"
+    hours: "3"
+    state: present
+    reload: true
 
 # Override the built-in home.arpa static local zone (RFC 8375). Without
 # this, queries for *.home.arpa return NXDOMAIN from the built-in zone
@@ -125,25 +116,21 @@
 # The file is NOT synced via XMLRPC HA sync — when HA is enabled, a
 # second task must copy it to the backup node.
 - name: Write home.arpa nodefault local-zone override
-  ansible.builtin.raw: |
-    TARGET="/usr/local/etc/unbound.opnsense.d/home-arpa-nodefault.conf"
-    CONTENT='server:
-      local-zone: "home.arpa." nodefault'
-    if [ -f "$TARGET" ] && echo "$CONTENT" | diff -q "$TARGET" - >/dev/null 2>&1; then
-      echo "UNCHANGED"
-    else
-      echo "$CONTENT" > "$TARGET"
-      chmod 644 "$TARGET"
-      echo "WRITTEN"
-    fi
+  ansible.builtin.copy:
+    content: |
+      server:
+        local-zone: "home.arpa." nodefault
+    dest: /usr/local/etc/unbound.opnsense.d/home-arpa-nodefault.conf
+    owner: root
+    group: wheel
+    mode: "0644"
   delegate_to: "{{ opnsense_api_args.firewall }}"
   vars:
     ansible_connection: ssh
     ansible_user: "{{ hostvars[inventory_hostname].opnsense_dns_ssh_user }}"
     ansible_ssh_common_args: "-o StrictHostKeyChecking=accept-new"
+    ansible_python_interpreter: /usr/local/bin/python3
     ansible_become: true
-  register: opn_dns_nodefault_result
-  changed_when: "'WRITTEN' in opn_dns_nodefault_result.stdout"
 
 - name: Validate Unbound configuration
   ansible.builtin.raw: configctl unbound check
@@ -157,6 +144,18 @@
   changed_when: false
   failed_when: opn_dns_check_result.rc != 0
 
+- name: Configure DNS over TLS upstream resolvers
+  oxlorg.opnsense.unbound_dot:
+    domain: "{{ item.domain }}"
+    target: "{{ item.server }}"
+    port: "{{ item.port }}"
+    verify: "{{ item.verify_cn }}"
+    state: present
+    reload: false
+  loop: "{{ opnsense_dns_dot | default([]) }}"
+  loop_control:
+    label: "{{ item.server }}:{{ item.port }} ({{ item.verify_cn }})"
+
 - name: Forward internal zone to cluster CoreDNS
   oxlorg.opnsense.unbound_forward:
     domain: "{{ netspec.cluster_domain }}"
@@ -167,19 +166,31 @@
     enabled: true
     reload: false
 
-- name: Create static host reservations
+- name: Create DNS host entries from unified inventory
   oxlorg.opnsense.unbound_host:
     hostname: "{{ item.hostname }}"
     domain: "{{ item.domain | default(netspec.cluster_domain) }}"
     record_type: "{{ item.record_type | default('A') }}"
-    value: "{{ item.value }}"
+    value: "{{ item.ip }}"
     description: "{{ opnsense_managed_tag }} static {{ item.hostname }}"
     match_fields: ["hostname", "domain", "record_type"]
     state: present
     reload: false
-  loop: "{{ netspec.static_hosts | default([]) }}"
+  loop: "{{ netspec.hosts | default([]) }}"
   loop_control:
-    label: "{{ item.hostname }}.{{ item.domain | default(netspec.cluster_domain) }} -> {{ item.value }}"
+    label: "{{ item.hostname }}.{{ item.domain | default(netspec.cluster_domain) }} -> {{ item.ip }}"
+
+- name: Create DNS alias entries from unified inventory
+  oxlorg.opnsense.unbound_host_alias:
+    alias: "{{ item.1.hostname }}"
+    domain: "{{ item.1.domain | default(netspec.cluster_domain) }}"
+    target: "{{ item.0.hostname }}.{{ item.0.domain | default(netspec.cluster_domain) }}"
+    description: "{{ opnsense_managed_tag }} alias {{ item.1.hostname }}"
+    state: present
+    reload: false
+  loop: "{{ netspec.hosts | default([]) | subelements('aliases', skip_missing=True) }}"
+  loop_control:
+    label: "{{ item.1.hostname }}.{{ item.1.domain | default(netspec.cluster_domain) }} -> {{ item.0.hostname }}"
 
 # Reconfigure when no drop-in file changed (soft reload, no DNS outage).
 - name: Reconfigure Unbound (soft reload)

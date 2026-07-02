@@ -26,6 +26,7 @@ opnsense_bridge_keep_members: []
 # These are set via a PHP script rendered over SSH.
 opnsense_assign_interfaces: "{{ lookup('env', 'OPNSENSE_ASSIGN_INTERFACES') | default(false, true) | bool }}"
 opnsense_interface_assignments: []
+opnsense_zone_bridges: []
 opnsense_interfaces_ssh_user: "{{ lookup('env', 'OPNSENSE_SSH_USER') | default('root', true) }}"
 
 # --- Interface data fallback ---

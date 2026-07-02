@@ -1,0 +1,16 @@
+---
+# Access control — subnets, domains, user agents, MIME types, ports.
+
+- name: Configure proxy access control list
+  oxlorg.opnsense.webproxy_acl:
+    allow: "{{ opnsense_proxy_acl_allow }}"
+    exclude: "{{ opnsense_proxy_acl_exclude }}"
+    banned: "{{ opnsense_proxy_acl_banned }}"
+    exclude_domains: "{{ opnsense_proxy_acl_whitelist_domains }}"
+    block_domains: "{{ opnsense_proxy_acl_blacklist_domains }}"
+    block_user_agents: "{{ opnsense_proxy_acl_block_user_agents }}"
+    block_mime_types: "{{ opnsense_proxy_acl_block_mime_types }}"
+    youtube_filter: "{{ opnsense_proxy_acl_youtube_filter if opnsense_proxy_acl_youtube_filter | default('') | length > 0 else omit }}"
+    ports_tcp: "{{ opnsense_proxy_acl_ports_tcp }}"
+    ports_ssl: "{{ opnsense_proxy_acl_ports_ssl }}"
+    reload: false

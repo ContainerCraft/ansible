@@ -21,6 +21,10 @@ opnsense_wan_ipv4_type: "{{ lookup('env', 'OPNSENSE_WAN_IPV4_TYPE') | default('d
 opnsense_wan_block_private: "{{ lookup('env', 'OPNSENSE_WAN_BLOCK_PRIVATE') | default(true, true) | bool }}"
 opnsense_wan_block_bogons: "{{ lookup('env', 'OPNSENSE_WAN_BLOCK_BOGONS') | default(true, true) | bool }}"
 
+# --- Packages ---
+opnsense_packages: []
+opnsense_packages_fail_on_pending_upgrade: false
+
 # --- Sysctl tunables ---
 # forwarding (v4+v6) is OPNsense default=1, not configured here.
 opnsense_tunables:

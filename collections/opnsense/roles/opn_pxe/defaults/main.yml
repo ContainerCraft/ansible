@@ -1,0 +1,107 @@
+---
+# =============================================================================
+# PXE — two-stage network boot via TFTP + HTTP + Kea DHCP
+# =============================================================================
+#
+# Stage 1: PXE ROM → DHCP (arch match) → TFTP iPXE loader
+# Stage 2: iPXE → DHCP (user-class "iPXE" match) → HTTP menu from Nginx
+#
+# TFTP serves ONLY the iPXE loader binaries (minimal).
+# HTTP (Nginx) serves everything else: menu, ISOs, kernels, initrds.
+
+# --- Connection ---
+opnsense_firewall_address: "{{ lookup('env', 'OPNSENSE_FIREWALL') | default('', true) }}"
+opnsense_api_key: "{{ lookup('env', 'OPNSENSE_API_KEY') | default('', true) }}"
+opnsense_api_secret: "{{ lookup('env', 'OPNSENSE_API_SECRET') | default('', true) }}"
+opnsense_api_port: "{{ lookup('env', 'OPNSENSE_API_PORT') | default(443, true) }}"
+opnsense_ssl_verify: "{{ lookup('env', 'OPNSENSE_SSL_VERIFY') | default(false, true) | bool }}"
+opnsense_api_args:
+  firewall: "{{ opnsense_firewall_address }}"
+  api_key: "{{ opnsense_api_key }}"
+  api_secret: "{{ opnsense_api_secret }}"
+  api_port: "{{ opnsense_api_port }}"
+  ssl_verify: "{{ opnsense_ssl_verify }}"
+
+# --- Apply discipline ---
+opnsense_managed_tag: "{{ lookup('env', 'OPNSENSE_MANAGED_TAG') | default('ansible-managed', true) }}"
+
+# --- Master toggle ---
+opnsense_pxe_enabled: false
+
+# --- TFTP server ---
+opnsense_pxe_tftp_listen: "0.0.0.0"
+
+# --- Stage 1: iPXE loader binaries (TFTP only) ---
+# Vanilla iPXE binaries from boot.ipxe.org — no embedded scripts.
+# These honor DHCP bootfile-name including our user-class matched HTTP URL.
+# netboot.xyz binaries have embedded scripts that override DHCP — they
+# are kept as downloadable assets for USB/ISO boot, not as TFTP loaders.
+#
+# Available at https://boot.ipxe.org/:
+#   BIOS: undionly.kpxe (UNDI drivers), ipxe.pxe (built-in drivers)
+#   x86_64 BIOS: x86_64-pcbios/undionly.kpxe, ipxe.pxe, ipxe.lkrn
+#   x86_64 EFI: x86_64-efi/ipxe.efi, snponly.efi
+#   x86_64 EFI SB: x86_64-efi-sb/ipxe.efi, snponly.efi + shimx64.efi
+#   ARM64 EFI: arm64-efi/ipxe.efi, snponly.efi
+#   ARM64 EFI SB: arm64-efi-sb/ipxe.efi, snponly.efi + shimaa64.efi
+opnsense_pxe_boot_url: "https://boot.ipxe.org"
+opnsense_pxe_boot_files:
+  bios: "undionly.kpxe"
+  bios_builtin: "ipxe.pxe"
+  efi: "x86_64-efi/ipxe.efi"
+  efi_snponly: "x86_64-efi/snponly.efi"
+  efi_sb: "x86_64-efi-sb/ipxe.efi"
+  efi_sb_snponly: "x86_64-efi-sb/snponly.efi"
+  efi_sb_shim: "shimx64.efi"
+  arm64: "arm64-efi/ipxe.efi"
+  arm64_snponly: "arm64-efi/snponly.efi"
+  arm64_sb: "arm64-efi-sb/ipxe.efi"
+  arm64_sb_snponly: "arm64-efi-sb/snponly.efi"
+  arm64_sb_shim: "shimaa64.efi"
+  iso: "ipxe.iso"
+  usb: "ipxe.usb"
+
+# --- netboot.xyz assets (downloadable, not TFTP boot files) ---
+# These are served by Nginx for USB/ISO boot and chainloading.
+# The iPXE menu has a netboot.xyz entry that chainloads from internet.
+# These local copies allow offline USB creation.
+opnsense_pxe_netbootxyz_url: "https://boot.netboot.xyz/ipxe"
+opnsense_pxe_netbootxyz_files:
+  iso: "netboot.xyz.iso"
+  efi: "netboot.xyz.efi"
+  kpxe: "netboot.xyz.kpxe"
+  img: "netboot.xyz.img"
+  arm64_efi: "netboot.xyz-arm64.efi"
+  arm64_snp: "netboot.xyz-arm64-snp.efi"
+  snp: "netboot.xyz-snp.efi"
+  snponly: "netboot.xyz-snponly.efi"
+  undionly: "netboot.xyz-undionly.kpxe"
+
+# --- Stage 2: iPXE HTTP menu ---
+# After iPXE loads, it re-requests DHCP with user-class="iPXE".
+# Kea matches this and serves bootfile-name = HTTP URL to our menu.
+# The menu is generated from opnsense_pxe_assets and deployed to
+# /usr/local/tftp/menu.ipxe, served by Nginx.
+# boot.home.arpa resolves per-subnet via Unbound views.
+opnsense_pxe_menu_port: "8080"
+opnsense_domain: "home.arpa"
+
+# --- Boot assets (ISOs, kernels, initramfs) ---
+# Downloaded to /usr/local/tftp/<dest> and served by Nginx over HTTP.
+# Each entry: url (source), dest (path under tftp root), checksum (sha256:...).
+# Subdirectories are created automatically.
+# vmlinuz + initrd are extracted from ISOs automatically.
+opnsense_pxe_assets: []
+
+# --- TFTP/HTTP root ---
+opnsense_pxe_root: "/usr/local/tftp"
+
+# --- PXE-enabled subnets ---
+# List of netspec zone names where PXE booting is available.
+# next_server is set to the zone gateway (OPNsense bridge IP).
+# Stage 1 arch options + stage 2 iPXE menu option are attached.
+opnsense_pxe_subnets: []
+
+# --- Data ---
+netspec:
+  zones: {}

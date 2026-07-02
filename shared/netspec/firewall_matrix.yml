@@ -32,6 +32,13 @@ firewall_matrix:
     - {seq: 12, from: dmz, to: any, action: pass, proto: udp, src: any, port: 67, log: false, desc: "dhcp server dmz"}
     - {seq: 13, from: clients, to: any, action: pass, proto: udp, src: any, port: 67, log: false, desc: "dhcp server clients"}
 
+  # Pre-isolation allows. These must have lower seq than isolation blocks so
+  # pf's quick-match evaluates them first. Used for targeted cross-zone access
+  # that would otherwise be blocked by the isolation rules below.
+  pre_isolation_allows:
+    - {seq: 50, from: clients, to: mgmt, action: pass, proto: TCP, port: 22, desc: "clients ssh to mgmt"}
+    - {seq: 51, from: clients, to: mgmt, action: pass, proto: ICMP, icmp_type: ["echoreq", "echorep", "unreach", "timex"], log: false, desc: "clients icmp to mgmt"}
+
   # Inter-zone isolation. Block rules before pass rules on the same interface.
   # IPv4 and IPv6 variants — without inet6 rules, IPv6 traffic bypasses isolation.
   isolation:

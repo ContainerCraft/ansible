@@ -1,0 +1,27 @@
+---
+# Forward proxy — interfaces, transparent mode, SSL inspection.
+# Mode-driven:
+#   transparent → transparent: true, ssl_inspection: false
+#   intercept   → transparent: true, ssl_inspection: true, ssl_ca required
+#   (neither)   → transparent: false, ssl_inspection: false (explicit proxy)
+
+- name: Configure forward proxy
+  oxlorg.opnsense.webproxy_forward:
+    interfaces: "{{ opnsense_proxy_interfaces }}"
+    port: "{{ opnsense_proxy_port }}"
+    port_ssl: "{{ opnsense_proxy_port_ssl }}"
+    transparent: "{{ opnsense_proxy_mode in ['transparent', 'intercept'] }}"
+    ssl_inspection: "{{ opnsense_proxy_mode == 'intercept' }}"
+    ssl_inspection_sni_only: "{{ opnsense_proxy_ssl_sni_only }}"
+    ssl_ca: "{{ opnsense_proxy_ssl_ca if opnsense_proxy_mode == 'intercept' else omit }}"
+    ssl_exclude: "{{ opnsense_proxy_ssl_exclude }}"
+    ssl_cache_mb: "{{ opnsense_proxy_ssl_cache_mb }}"
+    ssl_workers: "{{ opnsense_proxy_ssl_workers }}"
+    allow_interface_subnets: "{{ opnsense_proxy_allow_interface_subnets }}"
+    snmp: "{{ opnsense_proxy_snmp_enabled }}"
+    port_snmp: "{{ opnsense_proxy_snmp_port }}"
+    snmp_password: "{{ opnsense_proxy_snmp_password }}"
+    interfaces_ftp: "{{ opnsense_proxy_ftp_interfaces }}"
+    port_ftp: "{{ opnsense_proxy_ftp_port }}"
+    transparent_ftp: "{{ opnsense_proxy_ftp_transparent }}"
+    reload: false

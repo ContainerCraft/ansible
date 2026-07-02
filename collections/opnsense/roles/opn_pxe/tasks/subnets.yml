@@ -1,0 +1,88 @@
+---
+# Set next_server on PXE-enabled subnets and attach boot file options.
+# next_server tells PXE clients where the TFTP server is (stage 1 TFTP).
+#
+# Each subnet gets:
+#   - Global options: arch-matched TFTP boot files + iPXE user-class menu
+#   - Its own per-subnet HTTPClient option for UEFI HTTP Boot (WiFi)
+#
+# HTTPClient options are per-subnet because the HTTP URL contains the
+# gateway IP which differs per subnet.
+
+- name: Search PXE option UUIDs for subnet attachment
+  oxlorg.opnsense.raw:
+    module: kea
+    controller: dhcpv4
+    command: search_option
+    action: get
+    firewall: "{{ opnsense_api_args.firewall }}"
+    api_key: "{{ opnsense_api_args.api_key }}"
+    api_secret: "{{ opnsense_api_args.api_secret }}"
+    api_port: "{{ opnsense_api_args.api_port }}"
+    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
+  register: opn_pxe_options_for_subnets
+  changed_when: false
+
+- name: Build global PXE option UUID list (non-httpboot options)
+  ansible.builtin.set_fact:
+    opn_pxe_global_option_uuids: >-
+      {{ opn_pxe_options_for_subnets.response.rows | default([])
+         | selectattr('description', 'search', opnsense_managed_tag ~ ' pxe-')
+         | rejectattr('description', 'search', 'httpboot')
+         | map(attribute='uuid') | list }}
+    opn_pxe_all_options_by_desc: >-
+      {{ dict(opn_pxe_options_for_subnets.response.rows | default([])
+         | map(attribute='description') | list
+         | zip(opn_pxe_options_for_subnets.response.rows | default([])
+         | map(attribute='uuid') | list)) }}
+
+- name: Search existing subnet UUIDs
+  oxlorg.opnsense.raw:
+    module: kea
+    controller: dhcpv4
+    command: search_subnet
+    action: get
+    firewall: "{{ opnsense_api_args.firewall }}"
+    api_key: "{{ opnsense_api_args.api_key }}"
+    api_secret: "{{ opnsense_api_args.api_secret }}"
+    api_port: "{{ opnsense_api_args.api_port }}"
+    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
+  register: opn_pxe_subnets_existing
+  changed_when: false
+
+- name: Set next_server and attach PXE options on target subnets
+  oxlorg.opnsense.raw:
+    module: kea
+    controller: dhcpv4
+    command: "set_subnet/{{ _subnet_uuid }}"
+    action: post
+    data:
+      subnet4:
+        next_server: "{{ netspec.zones[item].gateway }}"
+        option: "{{ _subnet_options | join(',') }}"
+    firewall: "{{ opnsense_api_args.firewall }}"
+    api_key: "{{ opnsense_api_args.api_key }}"
+    api_secret: "{{ opnsense_api_args.api_secret }}"
+    api_port: "{{ opnsense_api_args.api_port }}"
+    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
+  vars:
+    _matching: >-
+      {{ opn_pxe_subnets_existing.response.rows | default([])
+         | selectattr('subnet', 'equalto', netspec.zones[item].subnet) | list }}
+    _subnet_uuid: "{{ (_matching | first).uuid if _matching | length > 0 else 'MISSING' }}"
+    _httpboot_desc: "{{ opnsense_managed_tag }} pxe-httpboot-{{ item }}"
+    _httpboot_uuid: "{{ [opn_pxe_all_options_by_desc[_httpboot_desc]] if _httpboot_desc in opn_pxe_all_options_by_desc else [] }}"
+    _subnet_options: "{{ opn_pxe_global_option_uuids + _httpboot_uuid }}"
+  loop: "{{ opnsense_pxe_subnets }}"
+  loop_control:
+    label: "{{ item }} ({{ netspec.zones[item].subnet }}) — {{ _subnet_options | length }} options"
+  when:
+    - item in netspec.zones
+    - netspec.zones[item].subnet is defined
+    - _subnet_uuid != 'MISSING'
+    - opn_pxe_global_option_uuids | length > 0
+
+- name: Apply Kea DHCP changes
+  oxlorg.opnsense.reload:
+    target: "kea"
+  when: not ansible_check_mode

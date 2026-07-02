@@ -1,0 +1,53 @@
+---
+# PAC auto-configuration — explicit proxy mode only.
+# Three interconnected resources: proxies define proxy servers,
+# matches define conditions, rules combine matches + proxies.
+# Proxies and matches must exist before rules reference them.
+
+- name: Configure PAC proxy servers
+  oxlorg.opnsense.webproxy_pac_proxy:
+    name: "{{ item.name }}"
+    type: "{{ item.type | default('proxy') }}"
+    url: "{{ item.url }}"
+    description: "{{ item.description | default('') }}"
+    state: present
+    reload: false
+  loop: "{{ opnsense_proxy_pac_proxies | default([]) }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Configure PAC match conditions
+  oxlorg.opnsense.webproxy_pac_match:
+    name: "{{ item.name }}"
+    type: "{{ item.type | default('url_matches') }}"
+    negate: "{{ item.negate | default(false) }}"
+    url: "{{ item.url | default(omit) }}"
+    hostname: "{{ item.hostname | default(omit) }}"
+    network: "{{ item.network | default(omit) }}"
+    domain_level_from: "{{ item.domain_level_from | default(omit) }}"
+    domain_level_to: "{{ item.domain_level_to | default(omit) }}"
+    hour_from: "{{ item.hour_from | default(omit) }}"
+    hour_to: "{{ item.hour_to | default(omit) }}"
+    month_from: "{{ item.month_from | default(omit) }}"
+    month_to: "{{ item.month_to | default(omit) }}"
+    weekday_from: "{{ item.weekday_from | default(omit) }}"
+    weekday_to: "{{ item.weekday_to | default(omit) }}"
+    description: "{{ item.description | default('') }}"
+    state: present
+    reload: false
+  loop: "{{ opnsense_proxy_pac_matches | default([]) }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Configure PAC rules
+  oxlorg.opnsense.webproxy_pac_rule:
+    description: "{{ item.description }}"
+    matches: "{{ item.matches }}"
+    proxies: "{{ item.proxies }}"
+    join_type: "{{ item.join_type | default('and') }}"
+    match_type: "{{ item.match_type | default('if') }}"
+    state: present
+    reload: false
+  loop: "{{ opnsense_proxy_pac_rules | default([]) }}"
+  loop_control:
+    label: "{{ item.description }}"

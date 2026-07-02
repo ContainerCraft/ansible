@@ -1,0 +1,254 @@
+---
+# Plugin services: mDNS repeater, LLDP, Wake-on-LAN, Telegraf.
+# Each service is gated by its own enable toggle. All use raw API
+# calls since no OXL modules exist for these plugins.
+
+# =========================================================================
+# mDNS Repeater — proxy mDNS between VLAN bridge interfaces
+# =========================================================================
+- name: Configure mDNS repeater
+  oxlorg.opnsense.raw:
+    module: mdnsrepeater
+    controller: settings
+    command: set
+    action: post
+    data:
+      mdnsrepeater:
+        enabled: "1"
+        interfaces: "{{ opnsense_mdns_interfaces | join(',') }}"
+    firewall: "{{ opnsense_api_args.firewall }}"
+    api_key: "{{ opnsense_api_args.api_key }}"
+    api_secret: "{{ opnsense_api_args.api_secret }}"
+    api_port: "{{ opnsense_api_args.api_port }}"
+    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
+  when: opnsense_mdns_enabled | bool
+
+- name: Apply mDNS repeater configuration
+  oxlorg.opnsense.raw:
+    module: mdnsrepeater
+    controller: service
+    command: reconfigure
+    action: post
+    firewall: "{{ opnsense_api_args.firewall }}"
+    api_key: "{{ opnsense_api_args.api_key }}"
+    api_secret: "{{ opnsense_api_args.api_secret }}"
+    api_port: "{{ opnsense_api_args.api_port }}"
+    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
+  when:
+    - opnsense_mdns_enabled | bool
+    - not ansible_check_mode
+
+# =========================================================================
+# LLDP — neighbor discovery on all interfaces
+# =========================================================================
+- name: Configure LLDP daemon
+  oxlorg.opnsense.raw:
+    module: lldpd
+    controller: general
+    command: set
+    action: post
+    data:
+      general:
+        enabled: "1"
+    firewall: "{{ opnsense_api_args.firewall }}"
+    api_key: "{{ opnsense_api_args.api_key }}"
+    api_secret: "{{ opnsense_api_args.api_secret }}"
+    api_port: "{{ opnsense_api_args.api_port }}"
+    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
+  when: opnsense_lldpd_enabled | bool
+
+- name: Apply LLDP configuration
+  oxlorg.opnsense.raw:
+    module: lldpd
+    controller: service
+    command: reconfigure
+    action: post
+    firewall: "{{ opnsense_api_args.firewall }}"
+    api_key: "{{ opnsense_api_args.api_key }}"
+    api_secret: "{{ opnsense_api_args.api_secret }}"
+    api_port: "{{ opnsense_api_args.api_port }}"
+    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
+  when:
+    - opnsense_lldpd_enabled | bool
+    - not ansible_check_mode
+
+# =========================================================================
+# Wake-on-LAN — register wired infrastructure hosts for remote wake
+# =========================================================================
+- name: Read existing WoL hosts
+  oxlorg.opnsense.raw:
+    module: wol
+    controller: wol
+    command: search_host
+    action: get
+    firewall: "{{ opnsense_api_args.firewall }}"
+    api_key: "{{ opnsense_api_args.api_key }}"
+    api_secret: "{{ opnsense_api_args.api_secret }}"
+    api_port: "{{ opnsense_api_args.api_port }}"
+    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
+  register: opn_wol_existing
+  when: opnsense_wol_enabled | bool
+  changed_when: false
+
+- name: Build existing WoL MAC list
+  ansible.builtin.set_fact:
+    opn_wol_existing_macs: >-
+      {{ opn_wol_existing.response.rows | default([])
+         | map(attribute='mac') | list }}
+  when: opnsense_wol_enabled | bool
+
+- name: Register WoL hosts from unified inventory
+  oxlorg.opnsense.raw:
+    module: wol
+    controller: wol
+    command: add_host
+    action: post
+    data:
+      host:
+        mac: "{{ item.mac }}"
+        interface: "lan"
+        descr: "{{ opnsense_managed_tag }} {{ item.hostname }}"
+    firewall: "{{ opnsense_api_args.firewall }}"
+    api_key: "{{ opnsense_api_args.api_key }}"
+    api_secret: "{{ opnsense_api_args.api_secret }}"
+    api_port: "{{ opnsense_api_args.api_port }}"
+    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
+  loop: "{{ netspec.hosts | default([]) | selectattr('mac', 'defined') | selectattr('wol', 'defined') | selectattr('wol') | list }}"
+  loop_control:
+    label: "{{ item.hostname }} {{ item.mac }}"
+  when:
+    - opnsense_wol_enabled | bool
+    - item.mac not in (opn_wol_existing_macs | default([]))
+
+# =========================================================================
+# Telegraf — metrics collection with Prometheus endpoint
+# =========================================================================
+- name: Configure Telegraf general settings
+  oxlorg.opnsense.raw:
+    module: telegraf
+    controller: general
+    command: set
+    action: post
+    data:
+      general:
+        enabled: "1"
+        interval: "{{ opnsense_telegraf_interval }}"
+    firewall: "{{ opnsense_api_args.firewall }}"
+    api_key: "{{ opnsense_api_args.api_key }}"
+    api_secret: "{{ opnsense_api_args.api_secret }}"
+    api_port: "{{ opnsense_api_args.api_port }}"
+    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
+  when: opnsense_telegraf_enabled | bool
+
+- name: Configure Telegraf input plugins
+  oxlorg.opnsense.raw:
+    module: telegraf
+    controller: input
+    command: set
+    action: post
+    data:
+      input:
+        cpu: "{{ opnsense_telegraf_inputs.cpu | default('1') }}"
+        disk: "{{ opnsense_telegraf_inputs.disk | default('1') }}"
+        diskio: "{{ opnsense_telegraf_inputs.diskio | default('1') }}"
+        mem: "{{ opnsense_telegraf_inputs.mem | default('1') }}"
+        network: "{{ opnsense_telegraf_inputs.net | default('1') }}"
+        pf: "{{ opnsense_telegraf_inputs.pf | default('1') }}"
+        system: "{{ opnsense_telegraf_inputs.system | default('1') }}"
+        swap: "1"
+        processes: "1"
+    firewall: "{{ opnsense_api_args.firewall }}"
+    api_key: "{{ opnsense_api_args.api_key }}"
+    api_secret: "{{ opnsense_api_args.api_secret }}"
+    api_port: "{{ opnsense_api_args.api_port }}"
+    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
+  when: opnsense_telegraf_enabled | bool
+
+- name: Configure Telegraf Prometheus output
+  oxlorg.opnsense.raw:
+    module: telegraf
+    controller: output
+    command: set
+    action: post
+    data:
+      output:
+        prometheus_enable: "{{ opnsense_telegraf_output_prometheus_enabled }}"
+        prometheus_listen: "{{ opnsense_telegraf_output_prometheus_listen | regex_replace('^:', '') }}"
+    firewall: "{{ opnsense_api_args.firewall }}"
+    api_key: "{{ opnsense_api_args.api_key }}"
+    api_secret: "{{ opnsense_api_args.api_secret }}"
+    api_port: "{{ opnsense_api_args.api_port }}"
+    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
+  when: opnsense_telegraf_enabled | bool
+
+- name: Apply Telegraf configuration
+  oxlorg.opnsense.raw:
+    module: telegraf
+    controller: service
+    command: reconfigure
+    action: post
+    firewall: "{{ opnsense_api_args.firewall }}"
+    api_key: "{{ opnsense_api_args.api_key }}"
+    api_secret: "{{ opnsense_api_args.api_secret }}"
+    api_port: "{{ opnsense_api_args.api_port }}"
+    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
+  when:
+    - opnsense_telegraf_enabled | bool
+    - not ansible_check_mode
+
+# =========================================================================
+# Service health verification — all enabled services must be running
+# =========================================================================
+- name: Verify mDNS repeater is running
+  oxlorg.opnsense.raw:
+    module: mdnsrepeater
+    controller: service
+    command: status
+    action: get
+    firewall: "{{ opnsense_api_args.firewall }}"
+    api_key: "{{ opnsense_api_args.api_key }}"
+    api_secret: "{{ opnsense_api_args.api_secret }}"
+    api_port: "{{ opnsense_api_args.api_port }}"
+    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
+  register: opn_mdns_status
+  changed_when: false
+  failed_when: "'running' not in (opn_mdns_status.response.status | default(''))"
+  when:
+    - opnsense_mdns_enabled | bool
+    - not ansible_check_mode
+
+- name: Verify LLDP daemon is running
+  oxlorg.opnsense.raw:
+    module: lldpd
+    controller: service
+    command: status
+    action: get
+    firewall: "{{ opnsense_api_args.firewall }}"
+    api_key: "{{ opnsense_api_args.api_key }}"
+    api_secret: "{{ opnsense_api_args.api_secret }}"
+    api_port: "{{ opnsense_api_args.api_port }}"
+    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
+  register: opn_lldpd_status
+  changed_when: false
+  failed_when: "'running' not in (opn_lldpd_status.response.status | default(''))"
+  when:
+    - opnsense_lldpd_enabled | bool
+    - not ansible_check_mode
+
+- name: Verify Telegraf is running
+  oxlorg.opnsense.raw:
+    module: telegraf
+    controller: service
+    command: status
+    action: get
+    firewall: "{{ opnsense_api_args.firewall }}"
+    api_key: "{{ opnsense_api_args.api_key }}"
+    api_secret: "{{ opnsense_api_args.api_secret }}"
+    api_port: "{{ opnsense_api_args.api_port }}"
+    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
+  register: opn_telegraf_status
+  changed_when: false
+  failed_when: "'running' not in (opn_telegraf_status.response.status | default(''))"
+  when:
+    - opnsense_telegraf_enabled | bool
+    - not ansible_check_mode

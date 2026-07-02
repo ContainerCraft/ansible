@@ -60,10 +60,22 @@
         name: containercraft.opnsense.opn_connect
       tags: [connect, always]
 
-    - name: System baseline (tunables, identity)
+    - name: ZFS snapshot before mutations
+      oxlorg.opnsense.snapshot:
+        name: "ansible-{{ lookup('pipe', 'date +%Y%m%d%H%M%S') }}"
+        state: present
+      tags: [always]
+      when: not ansible_check_mode
+
+    - name: System baseline (tunables, identity, packages)
       ansible.builtin.import_role:
         name: containercraft.opnsense.opn_system
       tags: [system]
+
+    - name: Users and RBAC (users, groups, privileges)
+      ansible.builtin.import_role:
+        name: containercraft.opnsense.opn_users
+      tags: [users, rbac]
 
     - name: Interfaces (single-NIC trunk VLANs, native blackhole)
       ansible.builtin.import_role:
@@ -75,7 +87,7 @@
         name: containercraft.opnsense.opn_dns
       tags: [dns, unbound]
 
-    - name: DHCP (Kea per-zone scopes)
+    - name: DHCP (Kea per-zone scopes, reservations, static ARP)
       ansible.builtin.import_role:
         name: containercraft.opnsense.opn_dhcp
       tags: [dhcp, kea]
@@ -84,6 +96,31 @@
       ansible.builtin.import_role:
         name: containercraft.opnsense.opn_firewall
       tags: [firewall, nat]
+
+    - name: Caching proxy (Squid)
+      ansible.builtin.import_role:
+        name: containercraft.opnsense.opn_proxy
+      tags: [proxy, squid]
+
+    - name: Nginx web server (file hosting, reverse proxy)
+      ansible.builtin.import_role:
+        name: containercraft.opnsense.opn_nginx
+      tags: [nginx, web]
+
+    - name: PXE network booting (netboot.xyz)
+      ansible.builtin.import_role:
+        name: containercraft.opnsense.opn_pxe
+      tags: [pxe, netboot, tftp]
+
+    - name: Plugin services (mDNS, LLDP, WoL, Telegraf)
+      ansible.builtin.import_role:
+        name: containercraft.opnsense.opn_services
+      tags: [services, mdns, lldp, wol, telegraf]
+
+    - name: IDS (Suricata intrusion detection)
+      ansible.builtin.import_role:
+        name: containercraft.opnsense.opn_ids
+      tags: [ids, suricata]
 
     - name: HA (CARP VIPs, hasync, sync trigger)
       ansible.builtin.include_role:

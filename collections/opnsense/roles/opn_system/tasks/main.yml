@@ -7,6 +7,18 @@
 #
 # Identity uses core/initialsetup wizard (gated by opnsense_apply_identity).
 
+- name: Ensure required OPNsense packages are installed
+  oxlorg.opnsense.package:
+    name: "{{ opnsense_packages }}"
+    action: install
+  when:
+    - opnsense_packages | default([]) | length > 0
+    - not ansible_check_mode
+  failed_when:
+    - opn_system_pkg_result is failed
+    - opnsense_packages_fail_on_pending_upgrade | bool
+  register: opn_system_pkg_result
+
 - name: Read current tunables
   ansible.builtin.uri:
     url: "https://{{ opnsense_api_args.firewall }}:{{ opnsense_api_args.api_port }}/api/core/tunables/searchItem"

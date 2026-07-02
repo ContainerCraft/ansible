@@ -1,0 +1,13 @@
+---
+# Authentication — backend selection, group restriction, credential TTL.
+# Incompatible with transparent mode — clients don't know they're proxied
+# and can't respond to auth challenges.
+
+- name: Configure proxy authentication
+  oxlorg.opnsense.webproxy_auth:
+    method: "{{ opnsense_proxy_auth_method | default(omit) }}"
+    group: "{{ opnsense_proxy_auth_group | default(omit) }}"
+    prompt: "{{ opnsense_proxy_auth_prompt }}"
+    ttl_h: "{{ opnsense_proxy_auth_ttl_h }}"
+    processes: "{{ opnsense_proxy_auth_processes }}"
+    reload: false

@@ -1,0 +1,177 @@
+---
+# Kea DHCP Options for two-stage PXE boot.
+#
+# Stage 1: PXE ROM sends DHCP with client-system [93] (architecture type).
+#   Kea matches arch and serves bootfile-name [67] = TFTP iPXE loader filename.
+#   PXE ROM downloads iPXE binary via TFTP from next-server.
+#
+# Stage 2: iPXE sends DHCP with user-class [77] = "iPXE".
+#   Kea matches user-class and serves bootfile-name [67] = HTTP URL to our menu.
+#   iPXE fetches menu.ipxe over HTTP from Nginx.
+#
+# Architecture codes (RFC 4578):
+#   0 = Intel x86 BIOS (legacy PXE)
+#   7 = EFI x86_64
+#   9 = EFI x86_64 (alternate)
+#   11 = EFI ARM64
+#
+# iPXE user-class: "iPXE" = hex 69505845
+
+- name: Search existing Kea DHCP options
+  oxlorg.opnsense.raw:
+    module: kea
+    controller: dhcpv4
+    command: search_option
+    action: get
+    firewall: "{{ opnsense_api_args.firewall }}"
+    api_key: "{{ opnsense_api_args.api_key }}"
+    api_secret: "{{ opnsense_api_args.api_secret }}"
+    api_port: "{{ opnsense_api_args.api_port }}"
+    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
+  register: opn_pxe_options_existing
+  changed_when: false
+
+- name: Build existing option maps
+  ansible.builtin.set_fact:
+    opn_pxe_existing_option_descs: >-
+      {{ opn_pxe_options_existing.response.rows | default([])
+         | map(attribute='description') | list }}
+    opn_pxe_existing_option_map: >-
+      {{ dict(opn_pxe_options_existing.response.rows | default([])
+         | map(attribute='description') | list
+         | zip(opn_pxe_options_existing.response.rows | default([]))) }}
+
+# --- Stage 1: PXE ROM architecture-matched TFTP boot files ---
+
+- name: Create BIOS PXE boot option (arch 0 → kpxe via TFTP)
+  oxlorg.opnsense.raw:
+    module: kea
+    controller: dhcpv4
+    command: add_option
+    action: post
+    data:
+      option:
+        description: "{{ opnsense_managed_tag }} pxe-bios-bootfile"
+        match_code: "93"
+        match_encoding: "uint16"
+        match_data: "0"
+        code: "67"
+        encoding: "string"
+        data: "bios.{{ opnsense_pxe_boot_files.bios | regex_search('[^.]+$') }}"
+    firewall: "{{ opnsense_api_args.firewall }}"
+    api_key: "{{ opnsense_api_args.api_key }}"
+    api_secret: "{{ opnsense_api_args.api_secret }}"
+    api_port: "{{ opnsense_api_args.api_port }}"
+    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
+  when: (opnsense_managed_tag ~ ' pxe-bios-bootfile') not in opn_pxe_existing_option_descs
+
+- name: Create EFI x86_64 PXE boot option (arch 7 → efi via TFTP)
+  oxlorg.opnsense.raw:
+    module: kea
+    controller: dhcpv4
+    command: add_option
+    action: post
+    data:
+      option:
+        description: "{{ opnsense_managed_tag }} pxe-efi-bootfile"
+        match_code: "93"
+        match_encoding: "uint16"
+        match_data: "7"
+        code: "67"
+        encoding: "string"
+        data: "efi.{{ opnsense_pxe_boot_files.efi | regex_search('[^.]+$') }}"
+    firewall: "{{ opnsense_api_args.firewall }}"
+    api_key: "{{ opnsense_api_args.api_key }}"
+    api_secret: "{{ opnsense_api_args.api_secret }}"
+    api_port: "{{ opnsense_api_args.api_port }}"
+    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
+  when: (opnsense_managed_tag ~ ' pxe-efi-bootfile') not in opn_pxe_existing_option_descs
+
+- name: Create EFI ARM64 PXE boot option (arch 11 → arm64 efi via TFTP)
+  oxlorg.opnsense.raw:
+    module: kea
+    controller: dhcpv4
+    command: add_option
+    action: post
+    data:
+      option:
+        description: "{{ opnsense_managed_tag }} pxe-arm64-bootfile"
+        match_code: "93"
+        match_encoding: "uint16"
+        match_data: "11"
+        code: "67"
+        encoding: "string"
+        data: "arm64.{{ opnsense_pxe_boot_files.arm64 | regex_search('[^.]+$') }}"
+    firewall: "{{ opnsense_api_args.firewall }}"
+    api_key: "{{ opnsense_api_args.api_key }}"
+    api_secret: "{{ opnsense_api_args.api_secret }}"
+    api_port: "{{ opnsense_api_args.api_port }}"
+    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
+  when: (opnsense_managed_tag ~ ' pxe-arm64-bootfile') not in opn_pxe_existing_option_descs
+
+# --- Stage 2: iPXE user-class matched HTTP menu URL ---
+# iPXE sends user-class [77] = "iPXE" (hex 69505845) on its DHCP request.
+# Kea matches this and serves bootfile-name [67] = HTTP URL to our local menu.
+# This overrides the stage 1 TFTP filename for iPXE clients.
+
+- name: Create or update iPXE HTTP menu option (user-class match)
+  oxlorg.opnsense.raw:
+    module: kea
+    controller: dhcpv4
+    command: "{{ 'set_option/' ~ opn_pxe_existing_option_map[opnsense_managed_tag ~ ' pxe-ipxe-menu'].uuid if (opnsense_managed_tag ~ ' pxe-ipxe-menu') in opn_pxe_existing_option_map else 'add_option' }}"
+    action: post
+    data:
+      option:
+        description: "{{ opnsense_managed_tag }} pxe-ipxe-menu"
+        match_code: "77"
+        match_encoding: "hex"
+        match_data: "69505845"
+        code: "67"
+        encoding: "string"
+        data: "menu.ipxe"
+    firewall: "{{ opnsense_api_args.firewall }}"
+    api_key: "{{ opnsense_api_args.api_key }}"
+    api_secret: "{{ opnsense_api_args.api_secret }}"
+    api_port: "{{ opnsense_api_args.api_port }}"
+    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
+
+# --- UEFI HTTP Boot: WiFi and modern firmware ---
+# Modern UEFI firmware (Dell 2018+, Lenovo 2019+, HP 2019+) ships with
+# HttpBootDxe which sends vendor-class "HTTPClient" (option 60) instead of
+# "PXEClient". The firmware handles WiFi association via stored credentials
+# and fetches the boot file over HTTP (TCP, reliable over WiFi).
+#
+# HTTPClient bootfile-name MUST be a full http:// URL — HttpBootDxe does
+# not use next-server + TFTP. The URL must use an IP address, not hostname,
+# because DNS may not be available before the boot file loads.
+#
+# Per-subnet options are required because the gateway IP differs per subnet
+# and the URL must contain the IP directly.
+
+- name: Create UEFI HTTP Boot options per PXE subnet (HTTPClient match)
+  oxlorg.opnsense.raw:
+    module: kea
+    controller: dhcpv4
+    command: "{{ 'set_option/' ~ opn_pxe_existing_option_map[opnsense_managed_tag ~ ' pxe-httpboot-' ~ item].uuid if (opnsense_managed_tag ~ ' pxe-httpboot-' ~ item) in opn_pxe_existing_option_map else 'add_option' }}"
+    action: post
+    data:
+      option:
+        description: "{{ opnsense_managed_tag }} pxe-httpboot-{{ item }}"
+        match_code: "60"
+        match_encoding: "string"
+        match_data: "HTTPClient"
+        code: "67"
+        encoding: "string"
+        data: "http://{{ netspec.zones[item].gateway }}:{{ opnsense_pxe_menu_port }}/efi.{{ opnsense_pxe_boot_files.efi | regex_search('[^.]+$') }}"
+    firewall: "{{ opnsense_api_args.firewall }}"
+    api_key: "{{ opnsense_api_args.api_key }}"
+    api_secret: "{{ opnsense_api_args.api_secret }}"
+    api_port: "{{ opnsense_api_args.api_port }}"
+    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
+  loop: "{{ opnsense_pxe_subnets }}"
+  loop_control:
+    label: "HTTPClient {{ item }} → http://{{ netspec.zones[item].gateway }}:{{ opnsense_pxe_menu_port }}/efi.{{ opnsense_pxe_boot_files.efi | regex_search('[^.]+$') }}"
+  when:
+    - item in netspec.zones
+    - netspec.zones[item].gateway is defined
+

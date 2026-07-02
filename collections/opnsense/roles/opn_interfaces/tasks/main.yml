@@ -14,7 +14,7 @@
     description: "{{ opnsense_bridge_description }}"
     members: "{{ opnsense_bridge_keep_members }}"
     state: present
-    reload: true
+    reload: false
   when:
     - opnsense_prepare_trunk_ports | bool
     - opnsense_bridge_description | length > 0
@@ -158,15 +158,144 @@
     var: opn_interfaces_bridge_additions
   when: opn_interfaces_bridge_additions is defined
 
-- name: Update bridge members to include assigned VLAN sub-interfaces
-  oxlorg.opnsense.interface_bridge:
-    description: "{{ item.bridge }}"
-    members: "{{ opnsense_bridge_keep_members + [item.opt] }}"
-    state: present
-    reload: true
+# Group collected additions by bridge description. For BRIDGE0, prepend the
+# keep_members (em0/em3). For new per-zone bridges, members are only the
+# collected VLAN sub-interface opts.
+- name: Build per-bridge member lists
+  ansible.builtin.set_fact:
+    opn_interfaces_bridge_map: >-
+      {{ opn_interfaces_bridge_map | default({}) | combine({
+           item.bridge: (opn_interfaces_bridge_map | default({}))[item.bridge] | default([]) + [item.opt]
+         }) }}
   loop: "{{ opn_interfaces_bridge_additions | default([]) }}"
   loop_control:
     label: "{{ item.bridge }} += {{ item.opt }}"
   when:
     - opnsense_assign_interfaces | bool
     - opn_interfaces_bridge_additions | default([]) | length > 0
+
+- name: Debug — per-bridge member map
+  ansible.builtin.debug:
+    var: opn_interfaces_bridge_map
+  when: opn_interfaces_bridge_map is defined
+
+# Create/update bridges. BRIDGE0 gets keep_members prepended. New bridges
+# get only their collected members. reload: false — deferred to one
+# reconfigure after all bridges are configured.
+- name: Create or update bridges with VLAN sub-interface members
+  oxlorg.opnsense.interface_bridge:
+    description: "{{ item.key }}"
+    members: "{{ (opnsense_bridge_keep_members if item.key == opnsense_bridge_description else []) + item.value }}"
+    state: present
+    reload: false
+  loop: "{{ opn_interfaces_bridge_map | default({}) | dict2items }}"
+  loop_control:
+    label: "{{ item.key }} = {{ (opnsense_bridge_keep_members if item.key == opnsense_bridge_description else []) + item.value }}"
+  when:
+    - opnsense_assign_interfaces | bool
+    - opn_interfaces_bridge_map is defined
+    - opn_interfaces_bridge_map | length > 0
+
+- name: Apply all bridge changes (single reconfigure)
+  oxlorg.opnsense.raw:
+    controller: bridge_settings
+    module: interfaces
+    command: reconfigure
+    action: post
+    firewall: "{{ opnsense_api_args.firewall }}"
+    api_key: "{{ opnsense_api_args.api_key }}"
+    api_secret: "{{ opnsense_api_args.api_secret }}"
+    api_port: "{{ opnsense_api_args.api_port }}"
+    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
+  when:
+    - opnsense_assign_interfaces | bool
+    - opn_interfaces_bridge_map is defined
+    - opn_interfaces_bridge_map | length > 0
+    - not ansible_check_mode
+
+# Read bridge description → device name mapping via API.
+# searchItem returns bridgeif (bridge0, bridge1...) which the oxlorg list
+# module strips from FIELDS_ALL. Raw GET is idempotent and check-mode safe.
+- name: Get bridge device names via API
+  oxlorg.opnsense.raw:
+    controller: bridge_settings
+    module: interfaces
+    command: searchItem
+    action: get
+    firewall: "{{ opnsense_api_args.firewall }}"
+    api_key: "{{ opnsense_api_args.api_key }}"
+    api_secret: "{{ opnsense_api_args.api_secret }}"
+    api_port: "{{ opnsense_api_args.api_port }}"
+    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
+  register: opn_bridge_search
+  changed_when: false
+  when:
+    - opnsense_assign_interfaces | bool
+    - opnsense_zone_bridges | default([]) | length > 0
+
+- name: Build bridge description to device name map
+  ansible.builtin.set_fact:
+    opn_interfaces_bridge_device_map: >-
+      {{ opn_bridge_search.response.rows
+         | items2dict(key_name='descr', value_name='bridgeif') }}
+  when:
+    - opn_bridge_search is defined
+    - opn_bridge_search.response is defined
+    - opn_bridge_search.response.rows is defined
+
+- name: Debug — bridge device map
+  ansible.builtin.debug:
+    var: opn_interfaces_bridge_device_map
+  when: opn_interfaces_bridge_device_map is defined
+
+# Assign per-zone bridges as OPNsense interfaces with gateway IPs.
+# Same PHP script as VLAN assignment — bridge devices are just device names.
+- name: Assign zone bridge interfaces with gateway IPs
+  ansible.builtin.raw: |
+    cat > /tmp/konductor_assign_iface.php << 'EOPHP'
+    {{ lookup('template', 'assign_interface.php.j2') }}
+    EOPHP
+    php /tmp/konductor_assign_iface.php
+    RC=$?
+    rm -f /tmp/konductor_assign_iface.php
+    exit $RC
+  delegate_to: "{{ opnsense_api_args.firewall }}"
+  vars:
+    ansible_connection: ssh
+    ansible_user: "{{ hostvars[inventory_hostname].opnsense_interfaces_ssh_user }}"
+    ansible_ssh_common_args: "-o StrictHostKeyChecking=accept-new"
+    ansible_become: true
+    item:
+      device: "{{ opn_interfaces_bridge_device_map[bridge_item.description] }}"
+      descr: "{{ bridge_item.descr }}"
+      ipaddr: "{{ bridge_item.ipaddr }}"
+      subnet: "{{ bridge_item.subnet }}"
+      enable: "1"
+  register: opn_bridge_assign_result
+  changed_when: "'OPN_IFACE_STATUS=created' in opn_bridge_assign_result.stdout or 'OPN_IFACE_STATUS=updated' in opn_bridge_assign_result.stdout"
+  failed_when: opn_bridge_assign_result.rc != 0
+  loop: "{{ opnsense_zone_bridges | default([]) }}"
+  loop_control:
+    loop_var: bridge_item
+    label: "{{ bridge_item.descr }} {{ bridge_item.ipaddr }}/{{ bridge_item.subnet }}"
+  when:
+    - opnsense_assign_interfaces | bool
+    - opnsense_zone_bridges is defined
+    - opn_interfaces_bridge_device_map is defined
+    - bridge_item.description in opn_interfaces_bridge_device_map
+
+- name: Reconfigure zone bridge interfaces
+  ansible.builtin.raw: >
+    configctl interface reconfigure {{ (item.stdout_lines | select('match', 'OPN_IFACE_IDENT=') | first).split('=')[1] }}
+  delegate_to: "{{ opnsense_api_args.firewall }}"
+  vars:
+    ansible_connection: ssh
+    ansible_user: "{{ hostvars[inventory_hostname].opnsense_interfaces_ssh_user }}"
+    ansible_ssh_common_args: "-o StrictHostKeyChecking=accept-new"
+    ansible_become: true
+  loop: "{{ opn_bridge_assign_result.results | default([]) }}"
+  loop_control:
+    label: "{{ item.bridge_item.descr | default('?') }}"
+  when:
+    - opnsense_assign_interfaces | bool
+    - item.changed | default(false)

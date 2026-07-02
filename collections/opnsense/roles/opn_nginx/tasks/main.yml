@@ -1,0 +1,232 @@
+---
+# Nginx web server — enables the service, creates locations, servers, upstreams.
+# Locations must be created before servers (servers reference location UUIDs).
+# Upstream servers must be created before upstreams (upstreams reference server UUIDs).
+
+- name: Enable Nginx
+  oxlorg.opnsense.nginx_general:
+    enabled: true
+    reload: false
+  when: opnsense_nginx_enabled | bool
+
+# --- Locations (created before servers that reference them) ---
+- name: Search existing locations
+  oxlorg.opnsense.raw:
+    module: nginx
+    controller: settings
+    command: searchlocation
+    action: get
+    firewall: "{{ opnsense_api_args.firewall }}"
+    api_key: "{{ opnsense_api_args.api_key }}"
+    api_secret: "{{ opnsense_api_args.api_secret }}"
+    api_port: "{{ opnsense_api_args.api_port }}"
+    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
+  register: opn_nginx_locations_existing
+  changed_when: false
+  when: opnsense_nginx_enabled | bool
+
+- name: Build existing location description list
+  ansible.builtin.set_fact:
+    opn_nginx_existing_loc_descs: >-
+      {{ opn_nginx_locations_existing.response.rows | default([])
+         | map(attribute='description') | list }}
+  when: opnsense_nginx_enabled | bool
+
+- name: Create Nginx locations
+  oxlorg.opnsense.raw:
+    module: nginx
+    controller: settings
+    command: addlocation
+    action: post
+    data:
+      location:
+        description: "{{ item.1.description }}"
+        urlpattern: "{{ item.1.urlpattern }}"
+        root: "{{ item.1.root | default('') }}"
+        autoindex: "{{ '1' if item.1.autoindex | default(false) else '0' }}"
+        index: "{{ item.1.index | default('') }}"
+        matchtype: "{{ item.1.matchtype | default('') }}"
+    firewall: "{{ opnsense_api_args.firewall }}"
+    api_key: "{{ opnsense_api_args.api_key }}"
+    api_secret: "{{ opnsense_api_args.api_secret }}"
+    api_port: "{{ opnsense_api_args.api_port }}"
+    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
+  loop: "{{ opnsense_nginx_servers | subelements('locations', skip_missing=True) }}"
+  loop_control:
+    label: "{{ item.1.description }}"
+  when:
+    - opnsense_nginx_enabled | bool
+    - item.1.description not in (opn_nginx_existing_loc_descs | default([]))
+
+# --- Resolve location UUIDs for server creation ---
+- name: Re-read locations after creation
+  oxlorg.opnsense.raw:
+    module: nginx
+    controller: settings
+    command: searchlocation
+    action: get
+    firewall: "{{ opnsense_api_args.firewall }}"
+    api_key: "{{ opnsense_api_args.api_key }}"
+    api_secret: "{{ opnsense_api_args.api_secret }}"
+    api_port: "{{ opnsense_api_args.api_port }}"
+    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
+  register: opn_nginx_locations_current
+  changed_when: false
+  when: opnsense_nginx_enabled | bool
+
+- name: Build location description to UUID map
+  ansible.builtin.set_fact:
+    opn_nginx_loc_uuid_map: >-
+      {{ dict(opn_nginx_locations_current.response.rows | default([])
+         | map(attribute='description') | list
+         | zip(opn_nginx_locations_current.response.rows | default([])
+         | map(attribute='uuid') | list)) }}
+  when: opnsense_nginx_enabled | bool
+
+# --- HTTP Servers ---
+- name: Search existing HTTP servers
+  oxlorg.opnsense.raw:
+    module: nginx
+    controller: settings
+    command: searchhttpserver
+    action: get
+    firewall: "{{ opnsense_api_args.firewall }}"
+    api_key: "{{ opnsense_api_args.api_key }}"
+    api_secret: "{{ opnsense_api_args.api_secret }}"
+    api_port: "{{ opnsense_api_args.api_port }}"
+    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
+  register: opn_nginx_servers_existing
+  changed_when: false
+  when: opnsense_nginx_enabled | bool
+
+- name: Build existing server name list
+  ansible.builtin.set_fact:
+    opn_nginx_existing_server_names: >-
+      {{ opn_nginx_servers_existing.response.rows | default([])
+         | map(attribute='servername') | list }}
+  when: opnsense_nginx_enabled | bool
+
+- name: Create Nginx HTTP servers
+  oxlorg.opnsense.raw:
+    module: nginx
+    controller: settings
+    command: addhttpserver
+    action: post
+    data:
+      httpserver:
+        servername: "{{ item.servername }}"
+        listen_http_address: "{{ item.listen_http | default('8080') }}"
+        listen_https_address: "{{ item.listen_https | default('') }}"
+        root: "{{ item.root | default('') }}"
+        locations: >-
+          {{ item.locations | default([])
+             | map(attribute='description')
+             | map('extract', opn_nginx_loc_uuid_map | default({}))
+             | select('defined')
+             | join(',') }}
+        sendfile: "{{ '1' if item.sendfile | default(true) else '0' }}"
+        disable_gzip: "0"
+        disable_bot_protection: "{{ '1' if item.disable_bot_protection | default(true) else '0' }}"
+        access_log_format: "{{ item.access_log_format | default('main') }}"
+        enable_acme_support: "{{ '1' if item.enable_acme | default(false) else '0' }}"
+        verify_client: "off"
+        default_server: "0"
+        https_only: "0"
+        http2: "1"
+        enable_http3: "0"
+        tls_reject_handshake: "0"
+        proxy_protocol: "0"
+        naxsi_extensive_log: "0"
+        block_nonpublic_data: "0"
+        ocsp_stapling: "0"
+        ocsp_verify: "0"
+        proxy_intercept_errors: "0"
+        log_handshakes: "1"
+        zero_rtt: "0"
+        error_log_level: "error"
+        client_header_buffer_size: "1"
+        large_client_header_buffers_number: "4"
+        large_client_header_buffers_size: "8"
+        tls_protocols: "TLSv1.2,TLSv1.3"
+        tls_prefer_server_ciphers: "1"
+    firewall: "{{ opnsense_api_args.firewall }}"
+    api_key: "{{ opnsense_api_args.api_key }}"
+    api_secret: "{{ opnsense_api_args.api_secret }}"
+    api_port: "{{ opnsense_api_args.api_port }}"
+    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
+  loop: "{{ opnsense_nginx_servers }}"
+  loop_control:
+    label: "{{ item.servername }} ({{ item.listen_http | default('8080') }})"
+  when:
+    - opnsense_nginx_enabled | bool
+    - item.servername not in (opn_nginx_existing_server_names | default([]))
+
+# --- Test and apply ---
+- name: Test Nginx configuration
+  oxlorg.opnsense.raw:
+    module: nginx
+    controller: settings
+    command: testconfig
+    action: get
+    firewall: "{{ opnsense_api_args.firewall }}"
+    api_key: "{{ opnsense_api_args.api_key }}"
+    api_secret: "{{ opnsense_api_args.api_secret }}"
+    api_port: "{{ opnsense_api_args.api_port }}"
+    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
+  register: opn_nginx_test
+  changed_when: false
+  when:
+    - opnsense_nginx_enabled | bool
+    - not ansible_check_mode
+
+- name: Apply Nginx configuration
+  oxlorg.opnsense.raw:
+    module: nginx
+    controller: service
+    command: reconfigure
+    action: post
+    firewall: "{{ opnsense_api_args.firewall }}"
+    api_key: "{{ opnsense_api_args.api_key }}"
+    api_secret: "{{ opnsense_api_args.api_secret }}"
+    api_port: "{{ opnsense_api_args.api_port }}"
+    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
+  when:
+    - opnsense_nginx_enabled | bool
+    - not ansible_check_mode
+
+- name: Verify Nginx is running
+  oxlorg.opnsense.raw:
+    module: nginx
+    controller: service
+    command: status
+    action: get
+    firewall: "{{ opnsense_api_args.firewall }}"
+    api_key: "{{ opnsense_api_args.api_key }}"
+    api_secret: "{{ opnsense_api_args.api_secret }}"
+    api_port: "{{ opnsense_api_args.api_port }}"
+    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
+  register: opn_nginx_status
+  changed_when: false
+  failed_when: "'running' not in (opn_nginx_status.response.status | default(''))"
+  when:
+    - opnsense_nginx_enabled | bool
+    - not ansible_check_mode
+
+- name: Verify Nginx serves boot files over HTTP
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ item.listen_http | default('8080') }}/"
+    return_content: false
+    status_code: 200
+  delegate_to: "{{ opnsense_api_args.firewall }}"
+  vars:
+    ansible_connection: ssh
+    ansible_user: "root"
+    ansible_ssh_common_args: "-o StrictHostKeyChecking=accept-new"
+    ansible_python_interpreter: /usr/local/bin/python3
+  loop: "{{ opnsense_nginx_servers }}"
+  loop_control:
+    label: "http://127.0.0.1:{{ item.listen_http | default('8080') }}/"
+  changed_when: false
+  when:
+    - opnsense_nginx_enabled | bool
+    - not ansible_check_mode

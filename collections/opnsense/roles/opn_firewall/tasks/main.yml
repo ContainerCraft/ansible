@@ -17,9 +17,11 @@
       {{ (
         (firewall_matrix.deny_all | default([]) | map(attribute='from') | list)
         + (firewall_matrix.dhcp_allow | default([]) | map(attribute='from') | list)
+        + (firewall_matrix.pre_isolation_allows | default([]) | map(attribute='from') | list)
         + (firewall_matrix.isolation | default([]) | map(attribute='from') | list)
         + (firewall_matrix.allows | default([]) | map(attribute='from') | list)
         + (firewall_matrix.wan_egress | default([]) | map(attribute='from') | list)
+        + (firewall_matrix.pre_isolation_allows | default([]) | map(attribute='to') | list)
         + (firewall_matrix.isolation | default([]) | map(attribute='to') | list)
         + (firewall_matrix.allows | default([]) | map(attribute='to') | list)
       ) | unique | reject('in', ['wan', 'any', 'cluster_dns']) | list }}
@@ -128,6 +130,7 @@
       {{
         (firewall_matrix.deny_all | default([]) | list)
         + (firewall_matrix.dhcp_allow | default([]) | list)
+        + (firewall_matrix.pre_isolation_allows | default([]) | list)
         + (firewall_matrix.isolation | default([]) | list)
         + (firewall_matrix.allows | default([]) | list)
         + (firewall_matrix.wan_egress | default([]) | list)
@@ -145,6 +148,7 @@
     source_net: "{{ item.src | default(item.from ~ '_net') }}"
     destination_net: "{{ 'any' if item.to in ['wan', 'any'] else (item.to if item.to == 'cluster_dns' else item.to ~ '_net') }}"
     destination_port: "{{ item.port | default(omit) }}"
+    icmp_type: "{{ item.icmp_type | default(omit) }}"
     log: "{{ item.log | default(true) }}"
     state_policy: "{{ 'floating' if (opnsense_ha_enabled | bool) else '' }}"
     description: "{{ opnsense_managed_tag }} {{ item.desc }}"

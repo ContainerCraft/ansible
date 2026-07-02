@@ -1,0 +1,20 @@
+---
+# General proxy settings — master enable, logging, headers, error pages.
+
+- name: Configure proxy general settings
+  oxlorg.opnsense.webproxy_general:
+    enabled: true
+    errors: "{{ opnsense_proxy_error_pages }}"
+    log: "{{ opnsense_proxy_log }}"
+    log_store: "{{ opnsense_proxy_log_store }}"
+    log_target: "{{ opnsense_proxy_log_target }}"
+    log_ignore: "{{ opnsense_proxy_log_ignore }}"
+    dns_servers: "{{ opnsense_proxy_dns_servers }}"
+    use_via_header: true
+    handling_forwarded_for: "{{ opnsense_proxy_forwarded_for }}"
+    hostname: "{{ opnsense_proxy_hostname }}"
+    email: "{{ opnsense_proxy_email }}"
+    suppress_version: "{{ opnsense_proxy_suppress_version }}"
+    handling_uri_whitespace: "{{ opnsense_proxy_uri_whitespace }}"
+    pinger: "{{ opnsense_proxy_pinger }}"
+    reload: false

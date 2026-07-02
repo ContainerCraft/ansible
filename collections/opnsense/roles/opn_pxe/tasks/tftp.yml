@@ -1,0 +1,150 @@
+---
+# TFTP server — enable, download vanilla iPXE + netboot.xyz boot files.
+# OPNsense os-tftp serves from /usr/local/tftp/.
+#
+# Vanilla iPXE binaries (boot.ipxe.org) go to TFTP root — these are
+# the stage 1 PXE ROM boot files with no embedded scripts.
+# TFTP filenames are flattened (basename only) since TFTP has no paths.
+#
+# netboot.xyz binaries go to assets/netboot.xyz/ — served by Nginx
+# for HTTP chainloading and USB/ISO download. NOT used as TFTP boot files
+# because their embedded scripts override DHCP options.
+#
+# The TFTP plugin has NO reconfigure action — only start/stop/restart/status.
+# Config changes require template reload + service restart.
+
+- name: Configure TFTP server
+  oxlorg.opnsense.raw:
+    module: tftp
+    controller: general
+    command: set
+    action: post
+    data:
+      general:
+        enabled: "1"
+        listen: "{{ opnsense_pxe_tftp_listen }}"
+    firewall: "{{ opnsense_api_args.firewall }}"
+    api_key: "{{ opnsense_api_args.api_key }}"
+    api_secret: "{{ opnsense_api_args.api_secret }}"
+    api_port: "{{ opnsense_api_args.api_port }}"
+    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
+
+- name: Render TFTP rc.conf.d template
+  ansible.builtin.raw: configctl template reload OPNsense/Tftp
+  delegate_to: "{{ opnsense_api_args.firewall }}"
+  vars: &ssh_vars
+    ansible_connection: ssh
+    ansible_user: "root"
+    ansible_ssh_common_args: "-o StrictHostKeyChecking=accept-new"
+    ansible_python_interpreter: /usr/local/bin/python3
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Restart TFTP service
+  oxlorg.opnsense.raw:
+    module: tftp
+    controller: service
+    command: restart
+    action: post
+    firewall: "{{ opnsense_api_args.firewall }}"
+    api_key: "{{ opnsense_api_args.api_key }}"
+    api_secret: "{{ opnsense_api_args.api_secret }}"
+    api_port: "{{ opnsense_api_args.api_port }}"
+    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
+  when: not ansible_check_mode
+
+- name: Ensure TFTP root directory exists
+  ansible.builtin.file:
+    path: /usr/local/tftp
+    state: directory
+    mode: "0755"
+  delegate_to: "{{ opnsense_api_args.firewall }}"
+  vars: *ssh_vars
+
+# --- Vanilla iPXE binaries (TFTP boot files) ---
+# Flattened to basename for TFTP — e.g., x86_64-efi/ipxe.efi → ipxe.efi
+# Renamed with arch prefix to avoid collisions between platforms.
+
+- name: Download vanilla iPXE boot files to TFTP root
+  ansible.builtin.get_url:
+    url: "{{ opnsense_pxe_boot_url }}/{{ item.value }}"
+    dest: "/usr/local/tftp/{{ item.key }}.{{ item.value | regex_search('[^.]+$') }}"
+    mode: "0644"
+    force: false
+  delegate_to: "{{ opnsense_api_args.firewall }}"
+  vars: *ssh_vars
+  loop: "{{ opnsense_pxe_boot_files | dict2items }}"
+  loop_control:
+    label: "{{ item.value }} → {{ item.key }}.{{ item.value | regex_search('[^.]+$') }}"
+  register: opn_pxe_downloads
+
+- name: Validate downloaded iPXE boot files
+  ansible.builtin.stat:
+    path: "/usr/local/tftp/{{ item.key }}.{{ item.value | regex_search('[^.]+$') }}"
+  delegate_to: "{{ opnsense_api_args.firewall }}"
+  vars: *ssh_vars
+  loop: "{{ opnsense_pxe_boot_files | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}.{{ item.value | regex_search('[^.]+$') }}"
+  register: opn_pxe_file_stats
+
+- name: Assert all iPXE boot files are present and valid
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+      - item.stat.size > 10000
+    fail_msg: "Boot file {{ item.item.key }} is missing or invalid ({{ item.stat.size | default(0) }} bytes)"
+    quiet: true
+  loop: "{{ opn_pxe_file_stats.results }}"
+  loop_control:
+    label: "{{ item.item.key }} ({{ item.stat.size | default(0) }} bytes)"
+
+- name: Create compatibility symlinks for older PXE clients
+  ansible.builtin.file:
+    src: "/usr/local/tftp/{{ item.key }}.{{ item.value | regex_search('[^.]+$') }}"
+    dest: "/usr/local/tftp/{{ item.key }}.{{ item.value | regex_search('[^.]+$') }}\xff"
+    state: link
+    force: true
+  delegate_to: "{{ opnsense_api_args.firewall }}"
+  vars: *ssh_vars
+  loop: "{{ opnsense_pxe_boot_files | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+# --- netboot.xyz binaries (HTTP assets, not TFTP) ---
+
+- name: Ensure netboot.xyz asset directory exists
+  ansible.builtin.file:
+    path: /usr/local/tftp/assets/netboot.xyz
+    state: directory
+    mode: "0755"
+  delegate_to: "{{ opnsense_api_args.firewall }}"
+  vars: *ssh_vars
+
+- name: Download netboot.xyz assets for HTTP serving
+  ansible.builtin.get_url:
+    url: "{{ opnsense_pxe_netbootxyz_url }}/{{ item.value }}"
+    dest: "/usr/local/tftp/assets/netboot.xyz/{{ item.value }}"
+    mode: "0644"
+    force: false
+  delegate_to: "{{ opnsense_api_args.firewall }}"
+  vars: *ssh_vars
+  loop: "{{ opnsense_pxe_netbootxyz_files | dict2items }}"
+  loop_control:
+    label: "{{ item.value }}"
+
+- name: Verify TFTP server is running
+  oxlorg.opnsense.raw:
+    module: tftp
+    controller: service
+    command: status
+    action: get
+    firewall: "{{ opnsense_api_args.firewall }}"
+    api_key: "{{ opnsense_api_args.api_key }}"
+    api_secret: "{{ opnsense_api_args.api_secret }}"
+    api_port: "{{ opnsense_api_args.api_port }}"
+    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
+  register: opn_pxe_tftp_status
+  changed_when: false
+  failed_when: "'running' not in (opn_pxe_tftp_status.response.status | default(''))"
+  when: not ansible_check_mode

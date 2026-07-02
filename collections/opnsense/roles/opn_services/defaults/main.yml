@@ -1,0 +1,45 @@
+---
+# --- Connection ---
+opnsense_firewall_address: "{{ lookup('env', 'OPNSENSE_FIREWALL') | default('', true) }}"
+opnsense_api_key: "{{ lookup('env', 'OPNSENSE_API_KEY') | default('', true) }}"
+opnsense_api_secret: "{{ lookup('env', 'OPNSENSE_API_SECRET') | default('', true) }}"
+opnsense_api_port: "{{ lookup('env', 'OPNSENSE_API_PORT') | default(443, true) }}"
+opnsense_ssl_verify: "{{ lookup('env', 'OPNSENSE_SSL_VERIFY') | default(false, true) | bool }}"
+opnsense_api_args:
+  firewall: "{{ opnsense_firewall_address }}"
+  api_key: "{{ opnsense_api_key }}"
+  api_secret: "{{ opnsense_api_secret }}"
+  api_port: "{{ opnsense_api_port }}"
+  ssl_verify: "{{ opnsense_ssl_verify }}"
+
+# --- Apply discipline ---
+opnsense_managed_tag: "{{ lookup('env', 'OPNSENSE_MANAGED_TAG') | default('ansible-managed', true) }}"
+
+# --- mDNS Repeater ---
+opnsense_mdns_enabled: false
+opnsense_mdns_interfaces: []
+
+# --- LLDP ---
+opnsense_lldpd_enabled: false
+
+# --- Wake-on-LAN ---
+opnsense_wol_enabled: false
+
+# --- Telegraf ---
+opnsense_telegraf_enabled: false
+opnsense_telegraf_interval: "10"
+opnsense_telegraf_inputs:
+  cpu: "1"
+  disk: "1"
+  diskio: "1"
+  mem: "1"
+  net: "1"
+  pf: "1"
+  system: "1"
+  temperature: "1"
+opnsense_telegraf_output_prometheus_enabled: "1"
+opnsense_telegraf_output_prometheus_listen: ":9273"
+
+# --- Data ---
+netspec:
+  hosts: []

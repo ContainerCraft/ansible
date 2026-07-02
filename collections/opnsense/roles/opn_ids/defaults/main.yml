@@ -1,0 +1,58 @@
+---
+# --- Connection ---
+opnsense_firewall_address: "{{ lookup('env', 'OPNSENSE_FIREWALL') | default('', true) }}"
+opnsense_api_key: "{{ lookup('env', 'OPNSENSE_API_KEY') | default('', true) }}"
+opnsense_api_secret: "{{ lookup('env', 'OPNSENSE_API_SECRET') | default('', true) }}"
+opnsense_api_port: "{{ lookup('env', 'OPNSENSE_API_PORT') | default(443, true) }}"
+opnsense_ssl_verify: "{{ lookup('env', 'OPNSENSE_SSL_VERIFY') | default(false, true) | bool }}"
+opnsense_api_args:
+  firewall: "{{ opnsense_firewall_address }}"
+  api_key: "{{ opnsense_api_key }}"
+  api_secret: "{{ opnsense_api_secret }}"
+  api_port: "{{ opnsense_api_port }}"
+  ssl_verify: "{{ opnsense_ssl_verify }}"
+
+# --- Apply discipline ---
+opnsense_managed_tag: "{{ lookup('env', 'OPNSENSE_MANAGED_TAG') | default('ansible-managed', true) }}"
+
+# --- IDS toggle ---
+opnsense_ids_enabled: false
+
+# --- IDS general ---
+opnsense_ids_interfaces: []
+opnsense_ids_block: false
+opnsense_ids_promiscuous: true
+opnsense_ids_syslog_alerts: true
+opnsense_ids_syslog_output: false
+opnsense_ids_log_payload: false
+opnsense_ids_log_retention: 14
+opnsense_ids_log_rotate: "daily"
+opnsense_ids_local_networks:
+  - "10.0.0.0/24"
+  - "10.10.0.0/24"
+  - "10.20.0.0/24"
+  - "10.30.0.0/24"
+  - "10.40.0.0/24"
+  - "10.100.0.0/24"
+opnsense_ids_pattern_matcher: "hs"
+opnsense_ids_profile: "medium"
+opnsense_ids_schedule: "ids rule updates"
+
+# --- IDS rulesets to enable ---
+opnsense_ids_rulesets:
+  - "ET open/drop"
+  - "ET open/compromised"
+  - "ET open/emerging-exploit"
+  - "ET open/emerging-malware"
+  - "ET open/emerging-trojan"
+
+# --- IDS policies ---
+opnsense_ids_policies: []
+# Example:
+#   - name: "alert on high severity"
+#     priority: 0
+#     rulesets: ["ET open/drop"]
+#     action: ["alert", "drop"]
+#     new_action: "alert"
+#     rules:
+#       signature_severity: ["Critical", "Major"]

@@ -1,0 +1,68 @@
+---
+# Suricata IDS/IPS. The workflow is:
+# 1. Enable the engine (ids_general)
+# 2. Enable rulesets (ids_ruleset) — downloads signature sets
+# 3. Create policies (ids_policy) — maps rulesets to actions
+# 4. Update rules (ids_action) — downloads latest signatures
+#
+# block: false = IDS-only (discovery mode, alert but don't block).
+# block: true = IPS (inline blocking, requires hardware offloading disabled).
+# promiscuous: true is required for VLAN-tagged traffic on physical NICs.
+
+- name: Configure Suricata IDS engine
+  oxlorg.opnsense.ids_general:
+    enabled: true
+    interfaces: "{{ opnsense_ids_interfaces }}"
+    block: "{{ opnsense_ids_block }}"
+    promiscuous: "{{ opnsense_ids_promiscuous }}"
+    syslog_alerts: "{{ opnsense_ids_syslog_alerts }}"
+    syslog_output: "{{ opnsense_ids_syslog_output }}"
+    log_payload: "{{ opnsense_ids_log_payload }}"
+    log_retention: "{{ opnsense_ids_log_retention }}"
+    log_rotate: "{{ opnsense_ids_log_rotate }}"
+    local_networks: "{{ opnsense_ids_local_networks }}"
+    pattern_matcher: "{{ opnsense_ids_pattern_matcher }}"
+    profile: "{{ opnsense_ids_profile }}"
+    schedule: "{{ opnsense_ids_schedule }}"
+    reload: false
+  when: opnsense_ids_enabled | bool
+
+- name: Enable IDS rulesets
+  oxlorg.opnsense.ids_ruleset:
+    name: "{{ item }}"
+    enabled: true
+    reload: false
+  loop: "{{ opnsense_ids_rulesets | default([]) }}"
+  loop_control:
+    label: "{{ item }}"
+  when: opnsense_ids_enabled | bool
+
+- name: Download and apply IDS rules
+  oxlorg.opnsense.ids_action:
+    action: "update_rules"
+  when:
+    - opnsense_ids_enabled | bool
+    - not ansible_check_mode
+
+- name: Create IDS policies
+  oxlorg.opnsense.ids_policy:
+    name: "{{ item.name }}"
+    priority: "{{ item.priority | default(0) }}"
+    rulesets: "{{ item.rulesets | default([]) }}"
+    action: "{{ item.action | default([]) }}"
+    new_action: "{{ item.new_action | default('alert') }}"
+    rules: "{{ item.rules | default({}) }}"
+    enabled: true
+    state: present
+    reload: false
+  loop: "{{ opnsense_ids_policies | default([]) }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: opnsense_ids_enabled | bool
+
+- name: Reconfigure Suricata
+  oxlorg.opnsense.ids_action:
+    action: "reconfigure"
+  when:
+    - opnsense_ids_enabled | bool
+    - not ansible_check_mode

@@ -10,10 +10,11 @@ netspec:
   cluster_dns: "10.0.0.51" # CoreDNS LoadBalancer on the cluster segment
   cluster_domain: "home.arpa" # internal split-horizon zone
 
-  # Static host reservations resolved by Unbound (Kea does not register leases).
-  # Each entry: hostname, value (IP); optional domain (default cluster_domain)
-  # and record_type (default A). Operator-populated; empty by default.
-  static_hosts: []
+  # Unified host inventory — single source of truth for DNS and DHCP.
+  # Each entry: hostname, ip, subnet, description. Optional: mac (triggers
+  # Kea DHCP reservation), domain (default cluster_domain), aliases (additional
+  # DNS names for the same IP). Operator-populated; empty by default.
+  hosts: []
 
   # Trunks. Each trunk is a physical OPNsense port carrying tagged zone VLANs to
   # one switch / power domain. Built on currently-unused ports (em1, em3); the

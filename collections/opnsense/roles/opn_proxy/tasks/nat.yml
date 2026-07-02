@@ -1,0 +1,164 @@
+---
+# NAT redirect rules for transparent proxy mode.
+# Uses the OPNsense firewall/d_nat API with savepoint-wrapped apply.
+# The DNAT controller extends FilterBaseController which provides
+# savepoint → apply(revision) → cancel_rollback(revision) flow.
+
+- name: Read existing DNAT rules
+  oxlorg.opnsense.raw:
+    module: firewall
+    controller: d_nat
+    command: search_rule
+    action: get
+    firewall: "{{ opnsense_api_args.firewall }}"
+    api_key: "{{ opnsense_api_args.api_key }}"
+    api_secret: "{{ opnsense_api_args.api_secret }}"
+    api_port: "{{ opnsense_api_args.api_port }}"
+    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
+  register: opn_proxy_dnat_existing
+  changed_when: false
+
+- name: Build existing DNAT description list
+  ansible.builtin.set_fact:
+    opn_proxy_dnat_existing_descs: >-
+      {{ opn_proxy_dnat_existing.response.rows | default([])
+         | map(attribute='descr') | list }}
+
+- name: Create DNAT savepoint
+  oxlorg.opnsense.raw:
+    module: firewall
+    controller: d_nat
+    command: savepoint
+    action: post
+    firewall: "{{ opnsense_api_args.firewall }}"
+    api_key: "{{ opnsense_api_args.api_key }}"
+    api_secret: "{{ opnsense_api_args.api_secret }}"
+    api_port: "{{ opnsense_api_args.api_port }}"
+    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
+  register: opn_proxy_dnat_savepoint
+  when:
+    - opnsense_proxy_mode in ['transparent', 'intercept']
+    - not ansible_check_mode
+
+- name: Create HTTP redirect rules for transparent proxy
+  oxlorg.opnsense.raw:
+    module: firewall
+    controller: d_nat
+    command: add_rule
+    action: post
+    data:
+      rule:
+        disabled: "0"
+        nordr: "0"
+        interface: "{{ item }}"
+        ipprotocol: "inet"
+        protocol: "tcp"
+        source:
+          network: "any"
+          not: "0"
+        destination:
+          network: "any"
+          port: "80"
+          not: "0"
+        target: "127.0.0.1"
+        local-port: "{{ opnsense_proxy_port }}"
+        pass: "pass"
+        log: "0"
+        descr: "{{ opnsense_managed_tag }} transparent proxy HTTP {{ item }}"
+    firewall: "{{ opnsense_api_args.firewall }}"
+    api_key: "{{ opnsense_api_args.api_key }}"
+    api_secret: "{{ opnsense_api_args.api_secret }}"
+    api_port: "{{ opnsense_api_args.api_port }}"
+    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
+  loop: "{{ opnsense_proxy_nat_interfaces | default(opnsense_proxy_interfaces) }}"
+  loop_control:
+    label: "HTTP redirect {{ item }}"
+  register: opn_proxy_dnat_http_result
+  when:
+    - opnsense_proxy_mode in ['transparent', 'intercept']
+    - (opnsense_managed_tag ~ ' transparent proxy HTTP ' ~ item) not in (opn_proxy_dnat_existing_descs | default([]))
+
+- name: Create HTTPS redirect rules for intercept proxy
+  oxlorg.opnsense.raw:
+    module: firewall
+    controller: d_nat
+    command: add_rule
+    action: post
+    data:
+      rule:
+        disabled: "0"
+        nordr: "0"
+        interface: "{{ item }}"
+        ipprotocol: "inet"
+        protocol: "tcp"
+        source:
+          network: "any"
+          not: "0"
+        destination:
+          network: "any"
+          port: "443"
+          not: "0"
+        target: "127.0.0.1"
+        local-port: "{{ opnsense_proxy_port_ssl }}"
+        pass: "pass"
+        log: "0"
+        descr: "{{ opnsense_managed_tag }} transparent proxy HTTPS {{ item }}"
+    firewall: "{{ opnsense_api_args.firewall }}"
+    api_key: "{{ opnsense_api_args.api_key }}"
+    api_secret: "{{ opnsense_api_args.api_secret }}"
+    api_port: "{{ opnsense_api_args.api_port }}"
+    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
+  loop: "{{ opnsense_proxy_nat_interfaces | default(opnsense_proxy_interfaces) }}"
+  loop_control:
+    label: "HTTPS redirect {{ item }}"
+  when:
+    - opnsense_proxy_mode == 'intercept'
+    - (opnsense_managed_tag ~ ' transparent proxy HTTPS ' ~ item) not in (opn_proxy_dnat_existing_descs | default([]))
+
+- name: Apply DNAT rules with savepoint
+  oxlorg.opnsense.raw:
+    module: firewall
+    controller: d_nat
+    command: "apply/{{ opn_proxy_dnat_savepoint.response.revision }}"
+    action: post
+    firewall: "{{ opnsense_api_args.firewall }}"
+    api_key: "{{ opnsense_api_args.api_key }}"
+    api_secret: "{{ opnsense_api_args.api_secret }}"
+    api_port: "{{ opnsense_api_args.api_port }}"
+    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
+  when:
+    - not ansible_check_mode
+    - opnsense_proxy_mode in ['transparent', 'intercept']
+    - opn_proxy_dnat_savepoint.response.revision is defined
+
+- name: Verify API still reachable after DNAT apply
+  oxlorg.opnsense.raw:
+    module: firewall
+    controller: d_nat
+    command: search_rule
+    action: get
+    firewall: "{{ opnsense_api_args.firewall }}"
+    api_key: "{{ opnsense_api_args.api_key }}"
+    api_secret: "{{ opnsense_api_args.api_secret }}"
+    api_port: "{{ opnsense_api_args.api_port }}"
+    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
+  changed_when: false
+  when:
+    - not ansible_check_mode
+    - opnsense_proxy_mode in ['transparent', 'intercept']
+
+- name: Cancel DNAT rollback (commit changes)
+  oxlorg.opnsense.raw:
+    module: firewall
+    controller: d_nat
+    command: "cancel_rollback/{{ opn_proxy_dnat_savepoint.response.revision }}"
+    action: post
+    firewall: "{{ opnsense_api_args.firewall }}"
+    api_key: "{{ opnsense_api_args.api_key }}"
+    api_secret: "{{ opnsense_api_args.api_secret }}"
+    api_port: "{{ opnsense_api_args.api_port }}"
+    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
+  when:
+    - not ansible_check_mode
+    - opnsense_proxy_mode in ['transparent', 'intercept']
+    - opn_proxy_dnat_savepoint.response.revision is defined
