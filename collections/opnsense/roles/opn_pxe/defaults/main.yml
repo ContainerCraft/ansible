@@ -88,9 +88,16 @@ opnsense_domain: "home.arpa"
 
 # --- Boot assets (ISOs, kernels, initramfs) ---
 # Downloaded to /usr/local/tftp/<dest> and served by Nginx over HTTP.
-# Each entry: url (source), dest (path under tftp root), checksum (sha256:...).
 # Subdirectories are created automatically.
-# vmlinuz + initrd are extracted from ISOs automatically.
+#
+# Required: url, dest, checksum (sha256:... or "" for rolling releases)
+# Optional:
+#   kernel   — path inside ISO to vmlinuz (e.g. "casper/vmlinuz")
+#   initrd   — path inside ISO to initrd (e.g. "casper/initrd")
+#   boot_args — kernel command line arguments for iPXE boot
+#
+# ISOs with kernel+initrd+boot_args get a kernel/initrd boot menu entry.
+# ISOs without kernel get a sanboot menu entry (direct ISO boot).
 opnsense_pxe_assets: []
 
 # --- TFTP/HTTP root ---

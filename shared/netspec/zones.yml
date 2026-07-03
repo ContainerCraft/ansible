@@ -10,10 +10,8 @@ netspec:
   cluster_dns: "10.0.0.51" # CoreDNS LoadBalancer on the cluster segment
   cluster_domain: "home.arpa" # internal split-horizon zone
 
-  # Unified host inventory — single source of truth for DNS and DHCP.
-  # Each entry: hostname, ip, subnet, description. Optional: mac (triggers
-  # Kea DHCP reservation), domain (default cluster_domain), aliases (additional
-  # DNS names for the same IP). Operator-populated; empty by default.
+  # Host inventory. Operator-populated; empty by default.
+  # See deploy/opnsense/vars/values.example.yml for full schema with examples.
   hosts: []
 
   # Trunks. Each trunk is a physical OPNsense port carrying tagged zone VLANs to
@@ -32,6 +30,8 @@ netspec:
   # Zone dictionary. Add a zone by adding a block in values.yml; set enabled:false
   # to exclude one. tagged VLANs ride the listed trunks; the native VLAN per
   # trunk is the blackhole. trunks: lists which power domains a zone reaches.
+  # identifier: OPNsense interface identifier (lan, opt1, opt2...) — set in
+  # operator values after interface assignment. Used by DHCP and firewall roles.
   zones:
     transit:
       enabled: true

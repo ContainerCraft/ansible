@@ -166,19 +166,19 @@
     enabled: true
     reload: false
 
-- name: Create DNS host entries from unified inventory
+- name: Create DNS host entries per interface
   oxlorg.opnsense.unbound_host:
-    hostname: "{{ item.hostname }}"
-    domain: "{{ item.domain | default(netspec.cluster_domain) }}"
-    record_type: "{{ item.record_type | default('A') }}"
-    value: "{{ item.ip }}"
-    description: "{{ opnsense_managed_tag }} static {{ item.hostname }}"
-    match_fields: ["hostname", "domain", "record_type"]
+    hostname: "{{ item.0.hostname }}"
+    domain: "{{ item.0.domain | default(netspec.cluster_domain) }}"
+    record_type: "A"
+    value: "{{ item.1.ip }}"
+    description: "{{ opnsense_managed_tag }} static {{ item.0.hostname }} {{ item.1.subnet }}"
+    match_fields: ["hostname", "domain", "value"]
     state: present
     reload: false
-  loop: "{{ netspec.hosts | default([]) }}"
+  loop: "{{ netspec.hosts | default([]) | subelements('interfaces') }}"
   loop_control:
-    label: "{{ item.hostname }}.{{ item.domain | default(netspec.cluster_domain) }} -> {{ item.ip }}"
+    label: "{{ item.0.hostname }}.{{ item.0.domain | default(netspec.cluster_domain) }} -> {{ item.1.ip }}"
 
 - name: Create DNS alias entries from unified inventory
   oxlorg.opnsense.unbound_host_alias:
@@ -192,6 +192,65 @@
   loop_control:
     label: "{{ item.1.hostname }}.{{ item.1.domain | default(netspec.cluster_domain) }} -> {{ item.0.hostname }}"
 
+# Unbound views for multi-homed hosts. Hosts with >1 interface need
+# per-subnet resolution so each subnet gets the correct local IP.
+# Generated as a drop-in conf in /usr/local/etc/unbound.opnsense.d/.
+- name: Build Unbound views for multi-homed hosts
+  ansible.builtin.set_fact:
+    opn_dns_views_conf: |
+      # Managed by ansible — per-subnet DNS views for multi-homed hosts
+      {% set ns = namespace(subnets={}) %}
+      {% for host in netspec.hosts | default([]) if host.interfaces | default([]) | length > 1 %}
+      {% for iface in host.interfaces %}
+      {% if iface.subnet not in ns.subnets %}
+      {% set _ = ns.subnets.update({iface.subnet: []}) %}
+      {% endif %}
+      {% set _ = ns.subnets[iface.subnet].append({'hostname': host.hostname, 'domain': host.domain | default(netspec.cluster_domain), 'ip': iface.ip}) %}
+      {% endfor %}
+      {% endfor %}
+      {% for subnet, entries in ns.subnets.items() %}
+
+      view:
+          name: "view-{{ subnet | regex_replace('[./]', '-') }}"
+      {% for entry in entries %}
+          local-data: "{{ entry.hostname }}.{{ entry.domain }} 60 IN A {{ entry.ip }}"
+      {% endfor %}
+          view-first: yes
+
+      {% endfor %}
+      server:
+      {% for subnet in ns.subnets %}
+          access-control-view: {{ subnet }} "view-{{ subnet | regex_replace('[./]', '-') }}"
+      {% endfor %}
+
+- name: Remove legacy PXE views config (replaced by multi-homed views)
+  ansible.builtin.file:
+    path: /usr/local/etc/unbound.opnsense.d/pxe-views.conf
+    state: absent
+  delegate_to: "{{ opnsense_api_args.firewall }}"
+  vars:
+    ansible_connection: ssh
+    ansible_user: "{{ hostvars[inventory_hostname].opnsense_dns_ssh_user }}"
+    ansible_ssh_common_args: "-o StrictHostKeyChecking=accept-new"
+    ansible_python_interpreter: /usr/local/bin/python3
+    ansible_become: true
+
+- name: Deploy Unbound views for multi-homed hosts
+  ansible.builtin.copy:
+    content: "{{ opn_dns_views_conf }}"
+    dest: /usr/local/etc/unbound.opnsense.d/multihomed-views.conf
+    owner: root
+    group: wheel
+    mode: "0644"
+  delegate_to: "{{ opnsense_api_args.firewall }}"
+  vars:
+    ansible_connection: ssh
+    ansible_user: "{{ hostvars[inventory_hostname].opnsense_dns_ssh_user }}"
+    ansible_ssh_common_args: "-o StrictHostKeyChecking=accept-new"
+    ansible_python_interpreter: /usr/local/bin/python3
+    ansible_become: true
+  register: opn_dns_views_result
+
 # Reconfigure when no drop-in file changed (soft reload, no DNS outage).
 - name: Reconfigure Unbound (soft reload)
   oxlorg.opnsense.reload:
@@ -199,22 +258,23 @@
   when:
     - not ansible_check_mode
     - not (opn_dns_nodefault_result.changed | default(false))
+    - not (opn_dns_views_result.changed | default(false))
 
-# Full stop+start when the drop-in file changed — start.sh copies files
+# Full stop+start when drop-in files changed — start.sh copies files
 # from /usr/local/etc/unbound.opnsense.d/ into /var/unbound/etc/.
 # reconfigureGeneral does not run start.sh and misses drop-in files.
-- name: Stop Unbound (drop-in file changed)
+- name: Stop Unbound (drop-in files changed)
   oxlorg.opnsense.service:
     name: "unbound"
     action: "stop"
   when:
     - not ansible_check_mode
-    - opn_dns_nodefault_result.changed | default(false)
+    - (opn_dns_nodefault_result.changed | default(false)) or (opn_dns_views_result.changed | default(false))
 
-- name: Start Unbound (drop-in file changed)
+- name: Start Unbound (drop-in files changed)
   oxlorg.opnsense.service:
     name: "unbound"
     action: "start"
   when:
     - not ansible_check_mode
-    - opn_dns_nodefault_result.changed | default(false)
+    - (opn_dns_nodefault_result.changed | default(false)) or (opn_dns_views_result.changed | default(false))

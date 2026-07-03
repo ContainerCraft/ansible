@@ -47,9 +47,18 @@ opnsense_proxy_dns_servers: []
 opnsense_proxy_pinger: true
 
 # --- Forward proxy (webproxy_forward) ---
+# OPNsense uses this list for both transparent interception AND direct
+# listening. Squid binds to each interface's gateway IP on port 3128
+# in addition to 127.0.0.1:3128 (intercept). Clients on these subnets
+# can reach squid directly at <gateway>:3128 without DNAT.
 opnsense_proxy_interfaces: []
 opnsense_proxy_port: 3128
 opnsense_proxy_port_ssl: 3129
+# Transparent intercept port — separate from the explicit proxy port (3128)
+# because OPNsense's squid.conf template only adds the intercept flag to
+# loopback ports. This port is added via pre-auth include with the intercept
+# flag on each proxy interface's gateway IP. DNAT rdr rules target this port.
+opnsense_proxy_intercept_port: 3130
 opnsense_proxy_allow_interface_subnets: true
 opnsense_proxy_ftp_interfaces: []
 opnsense_proxy_ftp_port: 2121

@@ -275,117 +275,188 @@ opnsense_dns_ssh_user: "root"
 # =============================================================================
 netspec_overrides:
   zones:
+    transit:
+      identifier: "opt5"
+    mgmt:
+      identifier: "opt16"
+    iot:
+      identifier: "opt17"
+    dmz:
+      identifier: "opt18"
+    clients:
+      identifier: "opt19"
     cluster:
+      identifier: "lan"
       dhcp: true
       dhcp_pool: "10.0.0.100 - 10.0.0.200"
+    sync:
+      identifier: "opt7"
 
-  # Unified host inventory — single source of truth for DNS and DHCP.
-  # Every entry creates a DNS A record (hostname.domain → ip).
-  # Entries with mac + subnet also create a Kea DHCP reservation.
-  # Optional aliases field adds additional DNS names for the same IP.
+  # Host inventory.
+  #
+  # Example — multi-homed host (resolves to correct IP per subnet):
+  #   - hostname: "gateway"
+  #     description: "Edge router"
+  #     interfaces:
+  #       - ip: "10.10.0.1"
+  #         subnet: "10.10.0.0/24"
+  #       - ip: "10.100.0.1"
+  #         subnet: "10.100.0.0/24"
+  #
+  # Example — single-homed host with DHCP reservation and static ARP:
+  #   - hostname: "server1"
+  #     mac: "aa:bb:cc:dd:ee:ff"
+  #     static_arp: true
+  #     wol: true
+  #     description: "Rack server"
+  #     interfaces:
+  #       - ip: "10.10.0.50"
+  #         subnet: "10.10.0.0/24"
+  #
+  # Example — host with DNS aliases:
+  #   - hostname: "switch"
+  #     mac: "11:22:33:44:55:66"
+  #     description: "Managed switch"
+  #     aliases:
+  #       - hostname: "model-name"
+  #         domain: "vendor.home.arpa"
+  #     interfaces:
+  #       - ip: "10.0.0.21"
+  #         subnet: "10.0.0.0/24"
+  #
+  # Required fields: hostname, description, interfaces (list of {ip, subnet})
+  # Optional fields: mac, static_arp, wol, domain, aliases (list of {hostname, domain})
   hosts:
-    # OPNsense gateway (DNS only, no DHCP — it IS the DHCP server)
+    # OPNsense gateway — present on every zone subnet
     - hostname: "stargate"
-      ip: "10.0.0.1"
-      subnet: "10.0.0.0/24"
       description: "OPNsense edge router"
-    # PXE/iPXE HTTP boot server — Nginx on port 8080.
-    # Global fallback record. Per-subnet resolution via Unbound views
-    # in /usr/local/etc/unbound.opnsense.d/pxe-views.conf
+      interfaces:
+        - ip: "10.0.0.1"
+          subnet: "10.0.0.0/24"
+        - ip: "10.10.0.1"
+          subnet: "10.10.0.0/24"
+        - ip: "10.20.0.1"
+          subnet: "10.20.0.0/24"
+        - ip: "10.30.0.1"
+          subnet: "10.30.0.0/24"
+        - ip: "10.40.0.1"
+          subnet: "10.40.0.0/24"
+        - ip: "10.100.0.1"
+          subnet: "10.100.0.0/24"
+    # PXE/iPXE HTTP boot server — Nginx on port 8080
+    # Resolves per-subnet to the local gateway via Unbound views
     - hostname: "boot"
-      ip: "10.0.0.1"
-      subnet: "10.0.0.0/24"
-      description: "PXE HTTP boot server (fallback)"
+      description: "PXE HTTP boot server"
+      interfaces:
+        - ip: "10.10.0.1"
+          subnet: "10.10.0.0/24"
+        - ip: "10.30.0.1"
+          subnet: "10.30.0.0/24"
+        - ip: "10.100.0.1"
+          subnet: "10.100.0.0/24"
     # Switches
     - hostname: "qnap"
-      ip: "10.0.0.21"
-      subnet: "10.0.0.0/24"
       description: "QNAP QSW-M408S managed switch"
       aliases:
         - hostname: "qsw-m408s"
           domain: "qnap.home.arpa"
+      interfaces:
+        - ip: "10.0.0.21"
+          subnet: "10.0.0.0/24"
     - hostname: "netgear"
-      ip: "10.0.0.22"
       mac: "34:98:b5:ac:e3:0c"
-      subnet: "10.0.0.0/24"
       static_arp: true
       description: "NETGEAR GS305EP PoE switch"
       aliases:
         - hostname: "gs305ep"
           domain: "netgear.home.arpa"
+      interfaces:
+        - ip: "10.0.0.22"
+          subnet: "10.0.0.0/24"
     # WiFi access points
     - hostname: "ap"
-      ip: "10.0.0.23"
       mac: "74:83:c2:14:af:99"
-      subnet: "10.0.0.0/24"
       static_arp: true
       description: "UniFi UAP-AC-HD access point"
       aliases:
         - hostname: "uap-ac-hd"
           domain: "unifi.home.arpa"
+      interfaces:
+        - ip: "10.0.0.23"
+          subnet: "10.0.0.0/24"
     - hostname: "orbi"
-      ip: "10.0.0.24"
       mac: "6c:cd:d6:e6:44:62"
-      subnet: "10.0.0.0/24"
       static_arp: true
       description: "NETGEAR Orbi RBR750 legacy WiFi"
       aliases:
         - hostname: "rbr750"
           domain: "orbi.home.arpa"
+      interfaces:
+        - ip: "10.0.0.24"
+          subnet: "10.0.0.0/24"
     # Talos cluster (optiplexprime)
     - hostname: "op1"
-      ip: "10.0.0.33"
       mac: "fc:34:97:1e:79:d4"
-      subnet: "10.0.0.0/24"
       static_arp: true
       wol: true
       description: "Talos op1 10G SFP"
+      interfaces:
+        - ip: "10.0.0.33"
+          subnet: "10.0.0.0/24"
     - hostname: "op2"
-      ip: "10.0.0.34"
       mac: "fc:34:97:1e:79:d1"
-      subnet: "10.0.0.0/24"
       static_arp: true
       wol: true
       description: "Talos op2 10G SFP"
+      interfaces:
+        - ip: "10.0.0.34"
+          subnet: "10.0.0.0/24"
     - hostname: "op3"
-      ip: "10.0.0.35"
       mac: "fc:34:97:1e:79:d2"
-      subnet: "10.0.0.0/24"
       static_arp: true
       wol: true
       description: "Talos op3 10G SFP"
+      interfaces:
+        - ip: "10.0.0.35"
+          subnet: "10.0.0.0/24"
     - hostname: "coredns"
-      ip: "10.0.0.51"
-      subnet: "10.0.0.0/24"
       description: "CoreDNS Cilium L2 VIP"
+      interfaces:
+        - ip: "10.0.0.51"
+          subnet: "10.0.0.0/24"
     # Workstations
     - hostname: "mithril"
-      ip: "10.10.0.184"
       mac: "cc:48:3a:77:f2:20"
-      subnet: "10.10.0.0/24"
       static_arp: true
       wol: true
       description: "mithril wired NIC"
+      interfaces:
+        - ip: "10.10.0.184"
+          subnet: "10.10.0.0/24"
     - hostname: "sting"
-      ip: "10.100.0.10"
       mac: "6c:6a:77:43:d0:a5"
-      subnet: "10.100.0.0/24"
       description: "sting WiFi"
+      interfaces:
+        - ip: "10.100.0.10"
+          subnet: "10.100.0.0/24"
     - hostname: "pocket"
-      ip: "10.100.0.11"
       mac: "22:0e:df:17:a7:fe"
-      subnet: "10.100.0.0/24"
       description: "Pixel pocket"
+      interfaces:
+        - ip: "10.100.0.11"
+          subnet: "10.100.0.0/24"
     - hostname: "leviathan"
-      ip: "10.100.0.12"
       mac: "00:2b:67:1d:f0:29"
-      subnet: "10.100.0.0/24"
       description: "laptop hosting uwuntu VM"
+      interfaces:
+        - ip: "10.100.0.12"
+          subnet: "10.100.0.0/24"
     - hostname: "uwuntu"
-      ip: "10.100.0.160"
       mac: "00:0c:29:6d:91:60"
-      subnet: "10.100.0.0/24"
       description: "VMware uwuntu VM"
+      interfaces:
+        - ip: "10.100.0.160"
+          subnet: "10.100.0.0/24"
 
 # =============================================================================
 # User and RBAC management
@@ -460,37 +531,63 @@ opnsense_nginx_servers:
 opnsense_pxe_enabled: true
 opnsense_pxe_tftp_listen: "0.0.0.0"
 opnsense_pxe_assets:
-  # netboot.xyz assets are downloaded separately via opnsense_pxe_netbootxyz_files
   # --- Ubuntu 24.04.4 LTS (Noble Numbat) ---
   - url: "https://releases.ubuntu.com/24.04.4/ubuntu-24.04.4-desktop-amd64.iso"
     dest: "assets/ubuntu/24.04/desktop/ubuntu-24.04.4-desktop-amd64.iso"
     checksum: "sha256:3a4c9877b483ab46d7c3fbe165a0db275e1ae3cfe56a5657e5a47c2f99a99d1e"
+    kernel: "casper/vmlinuz"
+    initrd: "casper/initrd"
+    boot_args: "root=/dev/ram0 ramdisk_size=3500000 ip=dhcp cloud-config-url=/dev/null"
   - url: "https://releases.ubuntu.com/24.04.4/ubuntu-24.04.4-live-server-amd64.iso"
     dest: "assets/ubuntu/24.04/server/ubuntu-24.04.4-live-server-amd64.iso"
     checksum: "sha256:e907d92eeec9df64163a7e454cbc8d7755e8ddc7ed42f99dbc80c40f1a138433"
+    kernel: "casper/vmlinuz"
+    initrd: "casper/initrd"
+    boot_args: "root=/dev/ram0 ramdisk_size=3500000 ip=dhcp cloud-config-url=/dev/null"
   - url: "https://cdimage.ubuntu.com/lubuntu/releases/24.04.4/release/lubuntu-24.04.4-desktop-amd64.iso"
     dest: "assets/ubuntu/24.04/lubuntu/lubuntu-24.04.4-desktop-amd64.iso"
     checksum: "sha256:5ca3ab769f1538fec7c7d8a5af2e73d3f06ea22f979f6560a9cc4acaf042a5fa"
+    kernel: "casper/vmlinuz"
+    initrd: "casper/initrd"
+    boot_args: "root=/dev/ram0 ramdisk_size=3500000 ip=dhcp cloud-config-url=/dev/null"
   # --- Ubuntu 26.04 LTS (Resolute Raccoon) ---
   - url: "https://releases.ubuntu.com/26.04/ubuntu-26.04-desktop-amd64.iso"
     dest: "assets/ubuntu/26.04/desktop/ubuntu-26.04-desktop-amd64.iso"
     checksum: "sha256:487f87faaf547ea30e0aba4d5b53346292571256b25333a978db1692bcee9dd2"
+    kernel: "casper/vmlinuz"
+    initrd: "casper/initrd"
+    boot_args: "root=/dev/ram0 ramdisk_size=3500000 ip=dhcp cloud-config-url=/dev/null"
   - url: "https://releases.ubuntu.com/26.04/ubuntu-26.04-live-server-amd64.iso"
     dest: "assets/ubuntu/26.04/server/ubuntu-26.04-live-server-amd64.iso"
     checksum: "sha256:dec49008a71f6098d0bcfc822021f4d042d5f2db279e4d75bdd981304f1ca5d9"
+    kernel: "casper/vmlinuz"
+    initrd: "casper/initrd"
+    boot_args: "root=/dev/ram0 ramdisk_size=3500000 ip=dhcp cloud-config-url=/dev/null"
   - url: "https://cdimage.ubuntu.com/lubuntu/releases/26.04/release/lubuntu-26.04-desktop-amd64.iso"
     dest: "assets/ubuntu/26.04/lubuntu/lubuntu-26.04-desktop-amd64.iso"
     checksum: "sha256:a9eef9e75c139caa428d11799f681e2d29e6ba7e22aa045d9a64599d45cd12ff"
+    kernel: "casper/vmlinuz"
+    initrd: "casper/initrd"
+    boot_args: "root=/dev/ram0 ramdisk_size=3500000 ip=dhcp cloud-config-url=/dev/null"
   # --- Fedora 44 ---
   - url: "https://dl.fedoraproject.org/pub/fedora/linux/releases/44/Workstation/x86_64/iso/Fedora-Workstation-Live-44-1.7.x86_64.iso"
     dest: "assets/fedora/44/workstation/Fedora-Workstation-Live-44-1.7.x86_64.iso"
     checksum: "sha256:1620295f6a00c27c3208f0c00b8ece4eab1ec69b9002152d97488bf26a426ddf"
+    kernel: "boot/x86_64/loader/linux"
+    initrd: "boot/x86_64/loader/initrd"
+    boot_args: "root=live:CDLABEL=Fedora-WS-Live-44-1-7 rd.live.image ip=dhcp"
   - url: "https://dl.fedoraproject.org/pub/fedora/linux/releases/44/Server/x86_64/iso/Fedora-Server-netinst-x86_64-44-1.7.iso"
     dest: "assets/fedora/44/server/Fedora-Server-netinst-x86_64-44-1.7.iso"
     checksum: "sha256:ae20c06bea746913cadea7d80463e13f4bf55bee4df2918111c921c674b70283"
+    kernel: "images/pxeboot/vmlinuz"
+    initrd: "images/pxeboot/initrd.img"
+    boot_args: "inst.repo=cdrom ip=dhcp"
   - url: "https://dl.fedoraproject.org/pub/fedora/linux/releases/44/Spins/x86_64/iso/Fedora-LXDE-Live-44-1.7.x86_64.iso"
     dest: "assets/fedora/44/lxde/Fedora-LXDE-Live-44-1.7.x86_64.iso"
     checksum: "sha256:b30d73a6f687790cd4b43c8910db99d5c93f557d45b91306b356d633f77a1c4a"
+    kernel: "boot/x86_64/loader/linux"
+    initrd: "boot/x86_64/loader/initrd"
+    boot_args: "root=live:CDLABEL=Fedora-LXDE-Live-44-1-7 rd.live.image ip=dhcp"
 opnsense_pxe_subnets:
   - "mgmt"
   - "clients"

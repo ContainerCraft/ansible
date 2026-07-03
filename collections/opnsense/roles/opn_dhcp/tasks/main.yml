@@ -1,63 +1,16 @@
 ---
 # Kea DHCPv4, per-zone scopes. Runs only when the phase serves zone DHCP.
 #
-# socket_type: udp so pf firewall rules gate DHCP traffic (raw bypasses pf).
+# Each zone requires an identifier field (lan, opt1, opt2...) set by
+# the operator in netspec.zones after interface assignment.
 # fw_rules: false — DHCP allow rules are in the firewall matrix (opn_firewall).
-# auto_options: false — explicit routers/dns prevents HA VIP mismatch and
-# interface IP ordering race condition.
+# auto_options: false — explicit routers/dns prevents HA VIP mismatch.
 
 - name: Disable Dnsmasq DHCP (conflicts with Kea)
   oxlorg.opnsense.dnsmasq_general:
     enabled: false
     reload: true
   when: opnsense_enforce_dnsmasq_disabled | bool
-
-# Resolve zone names to OPNsense interface identifiers for Kea.
-# Kea's interfaces field expects OPNsense identifiers (opt1, opt2...).
-# Match by interface description (set by opn_interfaces assignment script
-# to the zone descr field uppercased, e.g. "MGMT", "IOT", "DMZ").
-- name: Query OPNsense interface assignments for DHCP
-  ansible.builtin.uri:
-    url: "https://{{ opnsense_api_args.firewall }}:{{ opnsense_api_args.api_port }}/api/interfaces/overview/interfacesInfo/true"
-    method: GET
-    url_username: "{{ opnsense_api_args.api_key }}"
-    url_password: "{{ opnsense_api_args.api_secret }}"
-    force_basic_auth: true
-    validate_certs: "{{ opnsense_api_args.ssl_verify }}"
-    return_content: true
-    status_code: [200]
-  register: opn_dhcp_interfaces
-  when: phase.zone_dhcp | bool
-
-- name: Build description-to-identifier map for DHCP
-  ansible.builtin.set_fact:
-    opn_dhcp_descr_to_id: >-
-      {{ dict(opn_dhcp_interfaces.json.rows
-              | selectattr('identifier', 'defined')
-              | selectattr('identifier', 'ne', '')
-              | map(attribute='description') | list
-              | zip(opn_dhcp_interfaces.json.rows
-              | selectattr('identifier', 'defined')
-              | selectattr('identifier', 'ne', '')
-              | map(attribute='identifier') | list)) }}
-  when: phase.zone_dhcp | bool
-
-- name: Initialize DHCP zone interface map
-  ansible.builtin.set_fact:
-    opn_dhcp_zone_interfaces: {}
-  when: phase.zone_dhcp | bool
-
-- name: Resolve DHCP zone interfaces
-  ansible.builtin.set_fact:
-    opn_dhcp_zone_interfaces: "{{ opn_dhcp_zone_interfaces | combine({item.key: _resolved}) }}"
-  vars:
-    _resolved: >-
-      {{ 'lan' if item.value.role | default('') == 'cluster'
-         else (opn_dhcp_descr_to_id[item.key | upper] | default('UNRESOLVED_' ~ item.key)) }}
-  loop: "{{ netspec.zones | dict2items | selectattr('value.dhcp', 'defined') | selectattr('value.dhcp') | list }}"
-  loop_control:
-    label: "{{ item.key }} → {{ _resolved }}"
-  when: phase.zone_dhcp | bool
 
 - name: Enable Kea Control Agent
   oxlorg.opnsense.dhcp_controlagent:
@@ -68,7 +21,12 @@
 - name: Enable Kea DHCP on DHCP-serving zone gateways
   oxlorg.opnsense.dhcp_general:
     enabled: true
-    interfaces: "{{ opn_dhcp_zone_interfaces.values() | list }}"
+    interfaces: >-
+      {{ netspec.zones | dict2items
+         | selectattr('value.dhcp', 'defined')
+         | selectattr('value.dhcp')
+         | selectattr('value.identifier', 'defined')
+         | map(attribute='value.identifier') | list }}
     fw_rules: false
     socket_type: "{{ opnsense_dhcp_socket_type }}"
     lifetime: "{{ opnsense_dhcp_default_lifetime }}"
@@ -166,30 +124,30 @@
     - item.key in opnsense_dhcp_subnet_overrides
     - _subnet_uuid != 'MISSING'
 
-- name: Create Kea DHCP reservations from unified inventory
+- name: Create Kea DHCP reservations per host interface
   oxlorg.opnsense.dhcp_reservation:
-    ip: "{{ item.ip }}"
-    mac: "{{ item.mac }}"
-    hostname: "{{ item.hostname | default(omit) }}"
-    subnet: "{{ item.subnet }}"
-    description: "{{ opnsense_managed_tag }} {{ item.description | default(item.hostname) }}"
+    ip: "{{ item.1.ip }}"
+    mac: "{{ item.0.mac }}"
+    hostname: "{{ item.0.hostname | default(omit) }}"
+    subnet: "{{ item.1.subnet }}"
+    description: "{{ opnsense_managed_tag }} {{ item.0.description | default(item.0.hostname) }}"
     state: present
     reload: false
-  loop: "{{ netspec.hosts | default([]) | selectattr('mac', 'defined') | list }}"
+  loop: "{{ netspec.hosts | default([]) | selectattr('mac', 'defined') | subelements('interfaces') }}"
   loop_control:
-    label: "{{ item.ip }} {{ item.mac }} {{ item.hostname | default('') }}"
+    label: "{{ item.1.ip }} {{ item.0.mac }} {{ item.0.hostname | default('') }}"
   when: phase.zone_dhcp | bool
 
-- name: Create static ARP entries for wired infrastructure devices
+- name: Create static ARP entries per host interface
   oxlorg.opnsense.neighbor:
-    description: "{{ opnsense_managed_tag }} {{ item.hostname }}"
-    ethernet_address: "{{ item.mac }}"
-    ip_address: "{{ item.ip }}"
+    description: "{{ opnsense_managed_tag }} {{ item.0.hostname }} {{ item.1.subnet }}"
+    ethernet_address: "{{ item.0.mac }}"
+    ip_address: "{{ item.1.ip }}"
     state: present
     reload: false
-  loop: "{{ netspec.hosts | default([]) | selectattr('mac', 'defined') | selectattr('static_arp', 'defined') | selectattr('static_arp') | list }}"
+  loop: "{{ netspec.hosts | default([]) | selectattr('mac', 'defined') | selectattr('static_arp', 'defined') | selectattr('static_arp') | subelements('interfaces') }}"
   loop_control:
-    label: "{{ item.ip }} {{ item.mac }} {{ item.hostname }}"
+    label: "{{ item.1.ip }} {{ item.0.mac }} {{ item.0.hostname }}"
   when: phase.zone_dhcp | bool
   register: opn_dhcp_neighbor_result
 

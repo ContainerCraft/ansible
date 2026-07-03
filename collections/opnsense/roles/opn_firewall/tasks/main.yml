@@ -1,14 +1,11 @@
 ---
-# Zone firewall: aliases, interface resolution, zone policy matrix, savepoint-wrapped.
+# Zone firewall: aliases, zone policy matrix, savepoint-wrapped.
 #
 # Savepoint covers firewall/filter only. Aliases are outside the savepoint
 # controller and are created+applied first.
 #
-# Interface resolution: firewall rules reference OPNsense interface identifiers
-# (lan, opt1, opt2...), not zone names. The task queries the interface list,
-# builds a description→identifier map, and matches zone names to interface
-# descriptions (set by the opn_interfaces assignment script). The cluster zone
-# matches by role (role=cluster → 'lan').
+# Each zone requires an identifier field (lan, opt1, opt2...) set by
+# the operator in netspec.zones after interface assignment.
 
 # Build the referenced zones list first — used by alias filter and assert.
 - name: Build list of zones referenced in firewall matrix
@@ -57,64 +54,14 @@
     target: "alias"
   when: not ansible_check_mode
 
-# Resolve zone names to OPNsense interface identifiers.
-- name: Query OPNsense interface assignments
-  ansible.builtin.uri:
-    url: "https://{{ opnsense_api_args.firewall }}:{{ opnsense_api_args.api_port }}/api/interfaces/overview/interfacesInfo/true"
-    method: GET
-    url_username: "{{ opnsense_api_args.api_key }}"
-    url_password: "{{ opnsense_api_args.api_secret }}"
-    force_basic_auth: true
-    validate_certs: "{{ opnsense_api_args.ssl_verify }}"
-    return_content: true
-    status_code: [200]
-  register: opn_fw_interfaces
-
-# Build description→identifier map from assigned interfaces.
-# Interface descriptions are set by the opn_interfaces assignment script
-# to the zone descr field (e.g., "MGMT", "IOT", "DMZ", "SYNC", "TRANSIT").
-- name: Build description-to-identifier map
-  ansible.builtin.set_fact:
-    opn_fw_descr_to_id: >-
-      {{ dict(opn_fw_interfaces.json.rows
-              | selectattr('identifier', 'defined')
-              | selectattr('identifier', 'ne', '')
-              | map(attribute='description') | list
-              | zip(opn_fw_interfaces.json.rows
-              | selectattr('identifier', 'defined')
-              | selectattr('identifier', 'ne', '')
-              | map(attribute='identifier') | list)) }}
-
-# Build zone-to-interface map. Zones match by:
-# 1. role=cluster → 'lan'
-# 2. zone key uppercased matches an interface description
-- name: Initialize zone-to-interface map
-  ansible.builtin.set_fact:
-    opn_fw_zone_interfaces: {}
-
-- name: Build zone-to-interface-identifier map
-  ansible.builtin.set_fact:
-    opn_fw_zone_interfaces: "{{ opn_fw_zone_interfaces | combine({item.key: _resolved}) }}"
-  vars:
-    _descr_upper: "{{ item.key | upper }}"
-    _resolved: >-
-      {{ 'lan' if item.value.role | default('') == 'cluster'
-         else (opn_fw_descr_to_id[_descr_upper] | default('UNRESOLVED_' ~ item.key)) }}
-  loop: "{{ netspec.zones | dict2items }}"
-  loop_control:
-    label: "{{ item.key }} → {{ _resolved }}"
-  when:
-    - item.value.enabled | default(true) | bool
-
-- name: Assert all referenced zone interfaces are resolved
+- name: Assert all referenced zones have identifiers
   ansible.builtin.assert:
     that:
-      - opn_fw_zone_interfaces[item] is defined
-      - "'UNRESOLVED' not in opn_fw_zone_interfaces[item]"
+      - item in netspec.zones
+      - netspec.zones[item].identifier is defined
     fail_msg: >-
-      Zone '{{ item }}' referenced in firewall matrix but its interface could not
-      be resolved. Map: {{ opn_fw_zone_interfaces }}. Ensure the zone's VLAN device
-      is assigned with description '{{ item | upper }}' in Interfaces → Assignments.
+      Zone '{{ item }}' referenced in firewall matrix but has no identifier
+      in netspec.zones. Add identifier: "<opt_id>" to the zone definition.
   loop: "{{ opn_fw_all_referenced_zones }}"
 
 - name: Create firewall savepoint
@@ -142,7 +89,7 @@
     quick: true
     direction: in
     ip_protocol: "{{ item.ip_proto | default('inet') }}"
-    interface: ["{{ opn_fw_zone_interfaces[item.from] }}"]
+    interface: ["{{ netspec.zones[item.from].identifier }}"]
     action: "{{ item.action }}"
     protocol: "{{ item.proto | default('any') }}"
     source_net: "{{ item.src | default(item.from ~ '_net') }}"

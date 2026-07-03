@@ -18,10 +18,11 @@
   register: opn_proxy_dnat_existing
   changed_when: false
 
-- name: Build existing DNAT description list
+- name: Build existing managed DNAT description list
   ansible.builtin.set_fact:
     opn_proxy_dnat_existing_descs: >-
       {{ opn_proxy_dnat_existing.response.rows | default([])
+         | selectattr('descr', 'search', opnsense_managed_tag)
          | map(attribute='descr') | list }}
 
 - name: Create DNAT savepoint
@@ -39,6 +40,18 @@
   when:
     - opnsense_proxy_mode in ['transparent', 'intercept']
     - not ansible_check_mode
+
+- name: Build interface-to-gateway map for DNAT targets
+  ansible.builtin.set_fact:
+    opn_proxy_iface_to_gateway: >-
+      {{ dict(netspec.zones | dict2items
+         | selectattr('value.identifier', 'defined')
+         | selectattr('value.gateway', 'defined')
+         | map(attribute='value.identifier') | list
+         | zip(netspec.zones | dict2items
+         | selectattr('value.identifier', 'defined')
+         | selectattr('value.gateway', 'defined')
+         | map(attribute='value.gateway') | list)) }}
 
 - name: Create HTTP redirect rules for transparent proxy
   oxlorg.opnsense.raw:
@@ -60,8 +73,8 @@
           network: "any"
           port: "80"
           not: "0"
-        target: "127.0.0.1"
-        local-port: "{{ opnsense_proxy_port }}"
+        target: "{{ opn_proxy_iface_to_gateway[item] }}"
+        local-port: "{{ opnsense_proxy_intercept_port }}"
         pass: "pass"
         log: "0"
         descr: "{{ opnsense_managed_tag }} transparent proxy HTTP {{ item }}"
@@ -70,9 +83,9 @@
     api_secret: "{{ opnsense_api_args.api_secret }}"
     api_port: "{{ opnsense_api_args.api_port }}"
     ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
-  loop: "{{ opnsense_proxy_nat_interfaces | default(opnsense_proxy_interfaces) }}"
+  loop: "{{ opnsense_proxy_nat_interfaces if opnsense_proxy_nat_interfaces | length > 0 else opnsense_proxy_interfaces }}"
   loop_control:
-    label: "HTTP redirect {{ item }}"
+    label: "HTTP redirect {{ item }} → {{ opn_proxy_iface_to_gateway[item] }}:{{ opnsense_proxy_intercept_port }}"
   register: opn_proxy_dnat_http_result
   when:
     - opnsense_proxy_mode in ['transparent', 'intercept']
@@ -98,8 +111,8 @@
           network: "any"
           port: "443"
           not: "0"
-        target: "127.0.0.1"
-        local-port: "{{ opnsense_proxy_port_ssl }}"
+        target: "{{ opn_proxy_iface_to_gateway[item] }}"
+        local-port: "{{ opnsense_proxy_intercept_port_ssl | default(opnsense_proxy_port_ssl) }}"
         pass: "pass"
         log: "0"
         descr: "{{ opnsense_managed_tag }} transparent proxy HTTPS {{ item }}"
@@ -108,9 +121,9 @@
     api_secret: "{{ opnsense_api_args.api_secret }}"
     api_port: "{{ opnsense_api_args.api_port }}"
     ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
-  loop: "{{ opnsense_proxy_nat_interfaces | default(opnsense_proxy_interfaces) }}"
+  loop: "{{ opnsense_proxy_nat_interfaces if opnsense_proxy_nat_interfaces | length > 0 else opnsense_proxy_interfaces }}"
   loop_control:
-    label: "HTTPS redirect {{ item }}"
+    label: "HTTPS redirect {{ item }} → {{ opn_proxy_iface_to_gateway[item] }}:{{ opnsense_proxy_intercept_port_ssl | default(opnsense_proxy_port_ssl) }}"
   when:
     - opnsense_proxy_mode == 'intercept'
     - (opnsense_managed_tag ~ ' transparent proxy HTTPS ' ~ item) not in (opn_proxy_dnat_existing_descs | default([]))
@@ -162,3 +175,18 @@
     - not ansible_check_mode
     - opnsense_proxy_mode in ['transparent', 'intercept']
     - opn_proxy_dnat_savepoint.response.revision is defined
+
+- name: Reload pf filter to apply DNAT rules
+  oxlorg.opnsense.raw:
+    module: firewall
+    controller: d_nat
+    command: apply
+    action: post
+    firewall: "{{ opnsense_api_args.firewall }}"
+    api_key: "{{ opnsense_api_args.api_key }}"
+    api_secret: "{{ opnsense_api_args.api_secret }}"
+    api_port: "{{ opnsense_api_args.api_port }}"
+    ssl_verify: "{{ opnsense_api_args.ssl_verify }}"
+  when:
+    - not ansible_check_mode
+    - opnsense_proxy_mode in ['transparent', 'intercept']

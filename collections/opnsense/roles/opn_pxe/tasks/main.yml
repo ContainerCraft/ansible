@@ -15,12 +15,6 @@
   ansible.builtin.include_tasks: subnets.yml
   when: opnsense_pxe_enabled | bool
 
-- name: Include DNS views for per-subnet boot resolution
-  ansible.builtin.include_tasks: dns_views.yml
-  when:
-    - opnsense_pxe_enabled | bool
-    - opnsense_pxe_subnets | default([]) | length > 0
-
 - name: Include boot asset downloads (ISOs, kernels)
   ansible.builtin.include_tasks: assets.yml
   when:

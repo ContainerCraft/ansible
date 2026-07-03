@@ -53,15 +53,45 @@
     - opnsense_proxy_enabled | bool
     - opnsense_proxy_pac_proxies | default([]) | length > 0
 
-- name: Apply all proxy configuration changes
-  oxlorg.opnsense.reload:
-    target: "webproxy"
-  when:
-    - opnsense_proxy_enabled | bool
-    - not ansible_check_mode
-
-- name: Include transparent mode NAT documentation
+- name: Include transparent mode NAT rules
   ansible.builtin.include_tasks: nat.yml
   when:
     - opnsense_proxy_enabled | bool
     - opnsense_proxy_mode in ['transparent', 'intercept']
+
+- name: Deploy transparent intercept port config
+  ansible.builtin.copy:
+    content: |
+      {% for iface in (opnsense_proxy_nat_interfaces if opnsense_proxy_nat_interfaces | length > 0 else opnsense_proxy_interfaces) %}
+      {% set gw = netspec.zones | dict2items | selectattr('value.identifier', 'equalto', iface) | map(attribute='value.gateway') | first %}
+      http_port {{ gw }}:{{ opnsense_proxy_intercept_port }} intercept
+      {% endfor %}
+    dest: /usr/local/etc/squid/pre-auth/transparent-intercept.conf
+    owner: root
+    group: wheel
+    mode: "0644"
+  delegate_to: "{{ opnsense_api_args.firewall }}"
+  vars:
+    ansible_connection: ssh
+    ansible_user: "root"
+    ansible_ssh_common_args: "-o StrictHostKeyChecking=accept-new"
+    ansible_python_interpreter: /usr/local/bin/python3
+  when:
+    - opnsense_proxy_enabled | bool
+    - opnsense_proxy_mode in ['transparent', 'intercept']
+
+- name: Stop proxy service
+  oxlorg.opnsense.service:
+    name: "proxy"
+    action: "stop"
+  when:
+    - opnsense_proxy_enabled | bool
+    - not ansible_check_mode
+
+- name: Start proxy service
+  oxlorg.opnsense.service:
+    name: "proxy"
+    action: "start"
+  when:
+    - opnsense_proxy_enabled | bool
+    - not ansible_check_mode

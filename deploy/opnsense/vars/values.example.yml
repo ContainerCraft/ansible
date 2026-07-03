@@ -33,3 +33,71 @@ opnsense_tunables:
 #       iot:  {subnet: "10.20.0.0/24", gateway: "10.20.0.1", dhcp_pool: "10.20.0.100 - 10.20.0.200"}
 #       dmz:  {subnet: "10.30.0.0/24", gateway: "10.30.0.1", dhcp_pool: "10.30.0.100 - 10.30.0.200"}
 netspec_overrides: {}
+
+# Host inventory — unified source of truth for DNS, DHCP, static ARP, WoL.
+#
+# Every host has an interfaces list. Multi-homed hosts (>1 interface) get
+# Unbound DNS views so each subnet resolves the hostname to its local IP.
+# Hosts with mac get a Kea DHCP reservation per interface.
+# Hosts with static_arp get a static ARP entry per interface.
+# Hosts with wol: true are registered for Wake-on-LAN.
+#
+# Example — multi-homed (gateway on every subnet):
+#   - hostname: "gateway"
+#     description: "Edge router"
+#     interfaces:
+#       - ip: "10.10.0.1"
+#         subnet: "10.10.0.0/24"
+#       - ip: "10.100.0.1"
+#         subnet: "10.100.0.0/24"
+#
+# Example — single-homed with DHCP reservation and static ARP:
+#   - hostname: "server1"
+#     mac: "aa:bb:cc:dd:ee:ff"
+#     static_arp: true
+#     wol: true
+#     description: "Rack server"
+#     interfaces:
+#       - ip: "10.10.0.50"
+#         subnet: "10.10.0.0/24"
+#
+# Example — host with DNS aliases:
+#   - hostname: "switch"
+#     mac: "11:22:33:44:55:66"
+#     description: "Managed switch"
+#     aliases:
+#       - hostname: "model-name"
+#         domain: "vendor.home.arpa"
+#     interfaces:
+#       - ip: "10.0.0.21"
+#         subnet: "10.0.0.0/24"
+#
+# Required: hostname, description, interfaces (list of {ip, subnet})
+# Optional: mac, static_arp, wol, domain, aliases (list of {hostname, domain})
+
+# PXE boot assets — ISOs with kernel extraction paths.
+#
+# Example — Ubuntu with kernel+initrd boot:
+#   opnsense_pxe_assets:
+#     - url: "https://releases.ubuntu.com/26.04/ubuntu-26.04-live-server-amd64.iso"
+#       dest: "assets/ubuntu/26.04/server/ubuntu-26.04-live-server-amd64.iso"
+#       checksum: "sha256:..."
+#       kernel: "casper/vmlinuz"
+#       initrd: "casper/initrd"
+#       boot_args: "root=/dev/ram0 ramdisk_size=3500000 ip=dhcp cloud-config-url=/dev/null"
+#
+# Example — Fedora Live with different kernel path:
+#     - url: "https://dl.fedoraproject.org/.../Fedora-Workstation-Live-44-1.7.x86_64.iso"
+#       dest: "assets/fedora/44/workstation/Fedora-Workstation-Live-44-1.7.x86_64.iso"
+#       checksum: "sha256:..."
+#       kernel: "boot/x86_64/loader/linux"
+#       initrd: "boot/x86_64/loader/initrd"
+#       boot_args: "root=live:CDLABEL=Fedora-WS-Live-44-1-7 rd.live.image ip=dhcp"
+#
+# Example — ISO without kernel (direct sanboot):
+#     - url: "https://example.com/some-utility.iso"
+#       dest: "assets/utility/some-utility.iso"
+#       checksum: "sha256:..."
+#
+# Required: url, dest, checksum
+# Optional: kernel, initrd, boot_args (ISOs without kernel get sanboot menu entry)
